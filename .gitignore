@@ -1,0 +1,54 @@
+# Environment variables
+.env
+.env*.local
+*.env
+!*.env.example
+!.env.example
+
+# Go build artifacts
+backend/bin/
+bin/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+
+# Node / Frontend
+node_modules/
+frontend/node_modules/
+.next/
+frontend/.next/
+out/
+frontend/out/
+dist/
+frontend/dist/
+build/
+frontend/build/
+.npm
+*.tsbuildinfo
+
+# Storage runtime chunk contents (ignore stored files but keep directory anchors)
+storage/node1/*
+!storage/node1/.gitkeep
+storage/node2/*
+!storage/node2/.gitkeep
+storage/node3/*
+!storage/node3/.gitkeep
+storage/node4/*
+!storage/node4/.gitkeep
+storage/runtime/*
+!storage/runtime/.gitkeep
+uploads/
+tmp/
+
+# IDE and OS
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
