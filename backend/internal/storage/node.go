@@ -14,8 +14,9 @@ var (
 	ErrNodeNotFound     = errors.New("storage node not found")
 	ErrNodeUnavailable  = errors.New("storage node is offline or unavailable")
 	ErrNodeFull         = errors.New("storage node has insufficient available capacity")
-	ErrDuplicateNodeID  = errors.New("storage node with this ID already registered")
-	ErrNoAvailableNodes = errors.New("no online storage nodes available with sufficient capacity")
+	ErrDuplicateNodeID          = errors.New("storage node with this ID already registered")
+	ErrNoAvailableNodes         = errors.New("no online storage nodes available with sufficient capacity")
+	ErrInsufficientNodeCapacity = ErrNoAvailableNodes
 )
 
 // NodeStatus defines the operational state of a storage node.

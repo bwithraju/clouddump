@@ -148,6 +148,67 @@ func (m *StorageManager) SelectNodeForChunk(chunkSize int64, excludedNodeIDs ...
 	return m.strategy.SelectNode(nodes, chunkSize, excluded)
 }
 
+// AllocateAndReserveNode atomically selects a node and reserves the chunk capacity.
+func (m *StorageManager) AllocateAndReserveNode(chunkSize int64, excludedNodeIDs ...string) (*StorageNode, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	excluded := make(map[string]bool, len(excludedNodeIDs))
+	for _, id := range excludedNodeIDs {
+		excluded[id] = true
+	}
+
+	nodes := make([]*StorageNode, 0, len(m.nodes))
+	for _, n := range m.nodes {
+		nodes = append(nodes, n)
+	}
+
+	selected, err := m.strategy.SelectNode(nodes, chunkSize, excluded)
+	if err != nil {
+		return nil, err
+	}
+
+	if !selected.ReserveCapacity(chunkSize) {
+		return nil, fmt.Errorf("%w: failed to reserve %d bytes on node %s", ErrInsufficientNodeCapacity, chunkSize, selected.ID)
+	}
+
+	return selected, nil
+}
+
+// AllocateBatch plans node allocations for a series of chunks.
+func (m *StorageManager) AllocateBatch(chunkSizes []int64) ([]*StorageNode, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	allocated := make([]*StorageNode, 0, len(chunkSizes))
+	for _, size := range chunkSizes {
+		nodes := make([]*StorageNode, 0, len(m.nodes))
+		for _, n := range m.nodes {
+			nodes = append(nodes, n)
+		}
+
+		selected, err := m.strategy.SelectNode(nodes, size, nil)
+		if err != nil {
+			// Rollback reservations
+			for idx, n := range allocated {
+				n.ReleaseCapacity(chunkSizes[idx])
+			}
+			return nil, err
+		}
+
+		if !selected.ReserveCapacity(size) {
+			for idx, n := range allocated {
+				n.ReleaseCapacity(chunkSizes[idx])
+			}
+			return nil, fmt.Errorf("%w: failed to reserve %d bytes on node %s", ErrInsufficientNodeCapacity, size, selected.ID)
+		}
+
+		allocated = append(allocated, selected)
+	}
+
+	return allocated, nil
+}
+
 // StoreChunk stores a chunk on a specific node with capacity reservation and release safeguards.
 func (m *StorageManager) StoreChunk(ctx context.Context, nodeID string, chunkID string, r io.Reader, size int64) (string, int64, error) {
 	node, err := m.GetNode(nodeID)
