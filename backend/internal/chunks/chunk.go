@@ -16,6 +16,10 @@ var (
 	ErrInvalidChunkSize = errors.New("chunk size must be greater than zero")
 	// ErrEmptyFile is returned when an upload of 0 bytes is rejected.
 	ErrEmptyFile = errors.New("file size must be greater than zero")
+	// ErrMissingChunk is returned when a required chunk in the sequence is missing or inaccessible.
+	ErrMissingChunk = errors.New("missing chunk: required chunk not found or inaccessible")
+	// ErrIncompleteFile is returned when file chunk list is incomplete or out of sequence.
+	ErrIncompleteFile = errors.New("incomplete file: chunk sequence is broken or missing elements")
 )
 
 // DefaultChunkSize is 256 MB in bytes (268,435,456 bytes).
