@@ -6,11 +6,66 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"hash"
 	"io"
 	"sort"
 
 	"github.com/bwithraju/clouddump/backend/internal/storage"
 )
+
+// VerifyingReader streams chunk data while calculating SHA-256 on the fly.
+// Upon reaching EOF, it verifies the checksum against expectedChecksum.
+// If corrupted, it marks chunk.Status = ChunkStatusCorrupted and returns ErrChunkCorrupted.
+type VerifyingReader struct {
+	rc               io.ReadCloser
+	hasher           hash.Hash
+	expectedChecksum string
+	chunk            *ChunkMetadata
+	verified         bool
+	bytesRead        int64
+}
+
+// NewVerifyingReader constructs a VerifyingReader for a chunk.
+func NewVerifyingReader(rc io.ReadCloser, expectedChecksum string, chunk *ChunkMetadata) *VerifyingReader {
+	return &VerifyingReader{
+		rc:               rc,
+		hasher:           sha256.New(),
+		expectedChecksum: expectedChecksum,
+		chunk:            chunk,
+	}
+}
+
+func (vr *VerifyingReader) Read(p []byte) (int, error) {
+	n, err := vr.rc.Read(p)
+	if n > 0 {
+		vr.hasher.Write(p[:n])
+		vr.bytesRead += int64(n)
+	}
+
+	if errors.Is(err, io.EOF) {
+		if !vr.verified {
+			vr.verified = true
+			actualChecksum := hex.EncodeToString(vr.hasher.Sum(nil))
+			if vr.expectedChecksum != "" && actualChecksum != vr.expectedChecksum {
+				if vr.chunk != nil {
+					vr.chunk.Status = ChunkStatusCorrupted
+				}
+				chunkIdx := -1
+				if vr.chunk != nil {
+					chunkIdx = vr.chunk.ChunkIndex
+				}
+				return n, fmt.Errorf("%w: chunk index %d checksum mismatch (expected %s, got %s)",
+					ErrChunkCorrupted, chunkIdx, vr.expectedChecksum, actualChecksum)
+			}
+		}
+	}
+
+	return n, err
+}
+
+func (vr *VerifyingReader) Close() error {
+	return vr.rc.Close()
+}
 
 // FileReconstructor handles retrieving ordered chunks from distributed storage nodes
 // and streaming the reconstructed file without buffering into RAM.
@@ -53,8 +108,8 @@ func OrderAndValidateChunks(chunkList []*ChunkMetadata) ([]*ChunkMetadata, error
 }
 
 // ReconstructTo streams the reconstructed file directly into dest in chunk_index order.
-// Memory footprint is strictly bounded by io.Copy buffer size (~32KB).
-// If any chunk is missing, unreadable, or corrupted, it fails fast with a clear error.
+// Verifies SHA-256 checksum for each chunk as it streams.
+// If any chunk is corrupted, missing, or altered, it halts and returns a clear error.
 func (r *FileReconstructor) ReconstructTo(
 	ctx context.Context,
 	chunkList []*ChunkMetadata,
@@ -81,9 +136,12 @@ func (r *FileReconstructor) ReconstructTo(
 				ErrMissingChunk, chunk.ChunkIndex, chunk.StorageNodeID, chunk.ProviderObjectID, err)
 		}
 
+		// Wrap in verifying reader to validate SHA-256 on the fly
+		verifyingRC := NewVerifyingReader(chunkRC, chunk.Checksum, chunk)
+
 		// Stream chunk directly into dest
-		written, copyErr := io.Copy(dest, chunkRC)
-		closeErr := chunkRC.Close()
+		written, copyErr := io.Copy(dest, verifyingRC)
+		closeErr := verifyingRC.Close()
 
 		if copyErr != nil {
 			return totalWritten, fmt.Errorf("failed streaming chunk %d to destination: %w", chunk.ChunkIndex, copyErr)
@@ -93,8 +151,11 @@ func (r *FileReconstructor) ReconstructTo(
 		}
 
 		if written != chunk.Size {
+			if chunk != nil {
+				chunk.Status = ChunkStatusCorrupted
+			}
 			return totalWritten, fmt.Errorf("%w: chunk %d size mismatch (expected %d bytes, read %d bytes)",
-				ErrChunkChecksumMismatch, chunk.ChunkIndex, chunk.Size, written)
+				ErrChunkCorrupted, chunk.ChunkIndex, chunk.Size, written)
 		}
 
 		totalWritten += written
@@ -103,7 +164,7 @@ func (r *FileReconstructor) ReconstructTo(
 	return totalWritten, nil
 }
 
-// ReconstructedReader provides an io.ReadCloser that lazily reads across distributed chunks sequentially.
+// ReconstructedReader provides an io.ReadCloser that lazily reads and verifies across distributed chunks sequentially.
 type ReconstructedReader struct {
 	ctx            context.Context
 	storageManager *storage.StorageManager
@@ -112,7 +173,7 @@ type ReconstructedReader struct {
 	currentReader  io.ReadCloser
 }
 
-// NewReconstructedReader creates a streaming ReadCloser over all chunks.
+// NewReconstructedReader creates a streaming ReadCloser over all chunks with on-the-fly checksum validation.
 func (r *FileReconstructor) NewReconstructedReader(
 	ctx context.Context,
 	chunkList []*ChunkMetadata,
@@ -150,7 +211,7 @@ func (rr *ReconstructedReader) Read(p []byte) (int, error) {
 				return 0, fmt.Errorf("%w: chunk %d from node %s: %v",
 					ErrMissingChunk, chunk.ChunkIndex, chunk.StorageNodeID, err)
 			}
-			rr.currentReader = rc
+			rr.currentReader = NewVerifyingReader(rc, chunk.Checksum, chunk)
 		}
 
 		n, err := rr.currentReader.Read(p)
@@ -180,6 +241,48 @@ func (rr *ReconstructedReader) Close() error {
 		return err
 	}
 	return nil
+}
+
+// VerifyChunk independently checks the physical data of a chunk against its expected SHA-256 checksum.
+func (r *FileReconstructor) VerifyChunk(ctx context.Context, chunk *ChunkMetadata) (bool, error) {
+	if chunk == nil {
+		return false, errors.New("cannot verify nil chunk")
+	}
+
+	rc, err := r.storageManager.GetChunk(ctx, chunk.StorageNodeID, chunk.ProviderObjectID)
+	if err != nil {
+		chunk.Status = ChunkStatusUnavailable
+		return false, fmt.Errorf("%w: failed to open chunk %d on node %s: %v",
+			ErrMissingChunk, chunk.ChunkIndex, chunk.StorageNodeID, err)
+	}
+	defer rc.Close()
+
+	hasher := sha256.New()
+	written, err := io.Copy(hasher, rc)
+	if err != nil {
+		return false, fmt.Errorf("failed reading chunk data: %w", err)
+	}
+
+	actualChecksum := hex.EncodeToString(hasher.Sum(nil))
+	if written != chunk.Size || actualChecksum != chunk.Checksum {
+		chunk.Status = ChunkStatusCorrupted
+		return false, fmt.Errorf("%w: chunk %d checksum expected %s, got %s (size expected %d, read %d)",
+			ErrChunkCorrupted, chunk.ChunkIndex, chunk.Checksum, actualChecksum, chunk.Size, written)
+	}
+
+	chunk.Status = ChunkStatusStored
+	return true, nil
+}
+
+// VerifyAllChunks audits the integrity of all chunks for a file across their storage nodes.
+func (r *FileReconstructor) VerifyAllChunks(ctx context.Context, chunks []*ChunkMetadata) (bool, error) {
+	for _, chunk := range chunks {
+		healthy, err := r.VerifyChunk(ctx, chunk)
+		if err != nil || !healthy {
+			return false, err
+		}
+	}
+	return true, nil
 }
 
 // CalculateReconstructedSHA256 streams the reconstructed file and calculates its SHA-256 hash.

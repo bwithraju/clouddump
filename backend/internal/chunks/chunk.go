@@ -8,8 +8,10 @@ import (
 var (
 	// ErrInsufficientPoolStorage is returned when the combined storage pool cannot accommodate the file.
 	ErrInsufficientPoolStorage = errors.New("insufficient total pool storage for file")
-	// ErrChunkChecksumMismatch is returned when an extracted chunk's SHA-256 does not match its metadata.
-	ErrChunkChecksumMismatch = errors.New("chunk checksum mismatch")
+	// ErrChunkCorrupted is returned when an extracted chunk's SHA-256 does not match its expected metadata.
+	ErrChunkCorrupted = errors.New("data integrity error: chunk is corrupted (checksum mismatch)")
+	// ErrChunkChecksumMismatch is an alias for ErrChunkCorrupted.
+	ErrChunkChecksumMismatch = ErrChunkCorrupted
 	// ErrChunkNotFound is returned when a requested chunk is missing from metadata or storage.
 	ErrChunkNotFound = errors.New("chunk not found")
 	// ErrInvalidChunkSize is returned when an invalid chunk size is specified.
