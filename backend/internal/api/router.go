@@ -14,8 +14,13 @@ type HealthResponse struct {
 	Timestamp time.Time `json:"timestamp"`
 }
 
+// RouterConfig defines dependency injection parameters for NewRouter.
+type RouterConfig struct {
+	FileHandler *FileHandler
+}
+
 // NewRouter sets up and returns the main HTTP handler for the CloudDump API.
-func NewRouter() http.Handler {
+func NewRouter(configs ...RouterConfig) http.Handler {
 	mux := http.NewServeMux()
 
 	healthHandler := func(w http.ResponseWriter, r *http.Request) {
@@ -27,7 +32,7 @@ func NewRouter() http.Handler {
 		resp := HealthResponse{
 			Status:    "healthy",
 			Service:   "clouddump-backend",
-			Version:   "1.0.0-phase1",
+			Version:   "1.0.0-phase9",
 			Timestamp: time.Now().UTC(),
 		}
 
@@ -37,8 +42,22 @@ func NewRouter() http.Handler {
 	}
 
 	// Register health endpoints
-	mux.HandleFunc("/health", healthHandler)
-	mux.HandleFunc("/api/health", healthHandler)
+	mux.HandleFunc("GET /health", healthHandler)
+	mux.HandleFunc("GET /api/health", healthHandler)
+
+	// Register file endpoints if FileHandler is provided
+	if len(configs) > 0 && configs[0].FileHandler != nil {
+		fh := configs[0].FileHandler
+		mux.HandleFunc("POST /api/files/upload", fh.Upload)
+		mux.HandleFunc("GET /api/files/upload", func(w http.ResponseWriter, r *http.Request) {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		})
+		mux.HandleFunc("GET /api/files", fh.List)
+		mux.HandleFunc("GET /api/files/{id}", fh.GetDetails)
+		mux.HandleFunc("GET /api/files/{id}/status", fh.GetStatus)
+		mux.HandleFunc("GET /api/files/{id}/download", fh.Download)
+		mux.HandleFunc("DELETE /api/files/{id}", fh.Delete)
+	}
 
 	return withCORS(mux)
 }
@@ -48,7 +67,7 @@ func withCORS(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Filename, X-File-Size, X-User-ID")
 
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
