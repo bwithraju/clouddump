@@ -23,6 +23,7 @@ type RouterConfig struct {
 	UploadsHandler *UploadsHandler
 	AuthHandler    *AuthHandler
 	AuthService    *auth.AuthService
+	OAuthHandler   *OAuthHandler
 }
 
 // NewRouter sets up and returns the main HTTP handler for the CloudDump API.
@@ -115,6 +116,16 @@ func NewRouter(configs ...RouterConfig) http.Handler {
 			mux.HandleFunc("POST /api/uploads/{id}/chunks/{index}", wrapAuth(uh.UploadChunk))
 			mux.HandleFunc("DELETE /api/uploads/{id}", wrapAuth(uh.CancelSession))
 			mux.HandleFunc("POST /api/uploads/{id}/cancel", wrapAuth(uh.CancelSession))
+		}
+
+		// Register OAuth and Google Drive endpoints if OAuthHandler is provided
+		if cfg.OAuthHandler != nil {
+			oh := cfg.OAuthHandler
+			mux.HandleFunc("GET /api/oauth/google/auth-url", oh.GetAuthURL)
+			mux.HandleFunc("POST /api/oauth/google/callback", wrapAuth(oh.Callback))
+			mux.HandleFunc("GET /api/oauth/google/status", wrapAuth(oh.Status))
+			mux.HandleFunc("POST /api/oauth/google/disconnect", wrapAuth(oh.Disconnect))
+			mux.HandleFunc("POST /api/nodes/google-drive", wrapAuth(oh.CreateDriveNode))
 		}
 	}
 

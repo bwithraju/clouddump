@@ -100,10 +100,14 @@ func main() {
 		log.Fatalf("Failed to initialize file reconstructor: %v", err)
 	}
 
-	// 5. Initialize Auth Service & Handlers
+	// 5. Initialize Auth & OAuth Services & Handlers
 	sessionStore := auth.NewSessionStore(24 * time.Hour)
 	authService := auth.NewAuthService(repo.Users(), sessionStore)
 	authHandler := api.NewAuthHandler(authService)
+
+	googleOAuthConfig := auth.NewGoogleOAuthConfig()
+	oauthService := auth.NewOAuthService(googleOAuthConfig, repo.OAuthTokens())
+	oauthHandler := api.NewOAuthHandler(oauthService, mgr, repo)
 
 	// 6. Construct Handlers and Router
 	fileHandler := api.NewFileHandler(mgr, parallelUploader, fileReconstructor, repo, chunks.DefaultChunkSize)
@@ -117,6 +121,7 @@ func main() {
 		UploadsHandler: uploadsHandler,
 		AuthHandler:    authHandler,
 		AuthService:    authService,
+		OAuthHandler:   oauthHandler,
 	}
 
 	handler := api.NewRouter(routerConfig)

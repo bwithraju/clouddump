@@ -62,3 +62,16 @@ type ChunkRecord struct {
 	Replicas         []ChunkReplicaRecord `json:"replicas,omitempty"`
 	CreatedAt        time.Time            `json:"created_at" db:"created_at"`
 }
+
+// OAuthTokenRecord represents a stored OAuth credential for a user and external provider.
+type OAuthTokenRecord struct {
+	ID           string    `json:"id" db:"id"`
+	UserID       string    `json:"user_id" db:"user_id"`
+	Provider     string    `json:"provider" db:"provider"`
+	AccessToken  string    `json:"-" db:"access_token"`
+	RefreshToken string    `json:"-" db:"refresh_token"`
+	TokenType    string    `json:"token_type" db:"token_type"`
+	Expiry       time.Time `json:"expiry" db:"expiry"`
+	CreatedAt    time.Time `json:"created_at" db:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at" db:"updated_at"`
+}

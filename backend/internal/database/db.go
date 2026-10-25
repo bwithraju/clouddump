@@ -128,6 +128,21 @@ CREATE TABLE IF NOT EXISTS chunk_replicas (
 
 CREATE INDEX IF NOT EXISTS idx_chunk_replicas_chunk_id ON chunk_replicas(chunk_id);
 CREATE INDEX IF NOT EXISTS idx_chunk_replicas_storage_node_id ON chunk_replicas(storage_node_id);
+
+CREATE TABLE IF NOT EXISTS oauth_tokens (
+    id VARCHAR(64) PRIMARY KEY,
+    user_id VARCHAR(64) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    provider VARCHAR(64) NOT NULL,
+    access_token TEXT NOT NULL,
+    refresh_token TEXT NOT NULL,
+    token_type VARCHAR(64) NOT NULL DEFAULT 'Bearer',
+    expiry TIMESTAMP WITH TIME ZONE NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uq_user_provider UNIQUE (user_id, provider)
+);
+
+CREATE INDEX IF NOT EXISTS idx_oauth_tokens_user_id ON oauth_tokens(user_id);
 `
 
 // Migrate runs the initial database schema DDL inside a transaction.

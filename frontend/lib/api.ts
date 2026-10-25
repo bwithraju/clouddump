@@ -145,6 +145,62 @@ export async function fetchCurrentUser(): Promise<User | null> {
   return data.user || null;
 }
 
+// Google Drive OAuth & Storage Node APIs
+export async function fetchGoogleAuthURL(): Promise<{ auth_url: string; configured: boolean }> {
+  const res = await fetch(`${API_BASE_URL}/oauth/google/auth-url`, {
+    credentials: "include",
+  });
+  if (!res.ok) {
+    throw new Error(`Failed fetching Google Auth URL: HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function exchangeGoogleOAuthCode(code: string): Promise<any> {
+  const res = await fetch(`${API_BASE_URL}/oauth/google/callback`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify({ code }),
+  });
+  if (!res.ok) {
+    const errText = await res.text();
+    throw new Error(`Failed to link Google Drive: ${errText}`);
+  }
+  return res.json();
+}
+
+export async function fetchGoogleOAuthStatus(): Promise<{ connected: boolean; expires_at?: string }> {
+  const res = await fetch(`${API_BASE_URL}/oauth/google/status`, {
+    credentials: "include",
+  });
+  if (!res.ok) {
+    return { connected: false };
+  }
+  return res.json();
+}
+
+export async function disconnectGoogleDrive(): Promise<void> {
+  await fetch(`${API_BASE_URL}/oauth/google/disconnect`, {
+    method: "POST",
+    credentials: "include",
+  });
+}
+
+export async function createGoogleDriveNode(name?: string, folderId?: string): Promise<NodeStats> {
+  const res = await fetch(`${API_BASE_URL}/nodes/google-drive`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify({ name, folder_id: folderId }),
+  });
+  if (!res.ok) {
+    const errText = await res.text();
+    throw new Error(`Failed to create Google Drive storage node: ${errText}`);
+  }
+  return res.json();
+}
+
 // Health Check
 export async function fetchHealth(): Promise<HealthCheckResponse> {
   const res = await fetch(`${API_BASE_URL}/health`, {

@@ -22,6 +22,14 @@ type Repository interface {
 	Nodes() StorageNodeRepository
 	Files() FileRepository
 	Chunks() ChunkRepository
+	OAuthTokens() OAuthTokenRepository
+}
+
+// OAuthTokenRepository interface.
+type OAuthTokenRepository interface {
+	SaveToken(ctx context.Context, token *OAuthTokenRecord) error
+	GetToken(ctx context.Context, userID, provider string) (*OAuthTokenRecord, error)
+	DeleteToken(ctx context.Context, userID, provider string) error
 }
 
 // UserRepository interface.
@@ -86,6 +94,10 @@ func (r *PostgresRepository) Files() FileRepository {
 
 func (r *PostgresRepository) Chunks() ChunkRepository {
 	return &postgresChunkRepo{db: r.db}
+}
+
+func (r *PostgresRepository) OAuthTokens() OAuthTokenRepository {
+	return &postgresOAuthRepo{db: r.db}
 }
 
 // --- Postgres Implementations ---
@@ -488,24 +500,99 @@ func (r *postgresChunkRepo) DeleteChunksByFile(ctx context.Context, fileID strin
 	return err
 }
 
+type postgresOAuthRepo struct{ db *sql.DB }
+
+func (r *postgresOAuthRepo) SaveToken(ctx context.Context, token *OAuthTokenRecord) error {
+	query := `
+		INSERT INTO oauth_tokens (id, user_id, provider, access_token, refresh_token, token_type, expiry, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+		ON CONFLICT (user_id, provider) DO UPDATE SET
+			access_token = EXCLUDED.access_token,
+			refresh_token = CASE WHEN EXCLUDED.refresh_token <> '' THEN EXCLUDED.refresh_token ELSE oauth_tokens.refresh_token END,
+			token_type = EXCLUDED.token_type,
+			expiry = EXCLUDED.expiry,
+			updated_at = EXCLUDED.updated_at
+	`
+	now := time.Now().UTC()
+	if token.CreatedAt.IsZero() {
+		token.CreatedAt = now
+	}
+	token.UpdatedAt = now
+	if token.ID == "" {
+		token.ID = fmt.Sprintf("tok_%d", now.UnixNano())
+	}
+	if token.TokenType == "" {
+		token.TokenType = "Bearer"
+	}
+
+	_, err := r.db.ExecContext(ctx, query,
+		token.ID,
+		token.UserID,
+		token.Provider,
+		token.AccessToken,
+		token.RefreshToken,
+		token.TokenType,
+		token.Expiry,
+		token.CreatedAt,
+		token.UpdatedAt,
+	)
+	return err
+}
+
+func (r *postgresOAuthRepo) GetToken(ctx context.Context, userID, provider string) (*OAuthTokenRecord, error) {
+	query := `
+		SELECT id, user_id, provider, access_token, refresh_token, token_type, expiry, created_at, updated_at
+		FROM oauth_tokens
+		WHERE user_id = $1 AND provider = $2
+	`
+	row := r.db.QueryRowContext(ctx, query, userID, provider)
+	tok := &OAuthTokenRecord{}
+	err := row.Scan(
+		&tok.ID,
+		&tok.UserID,
+		&tok.Provider,
+		&tok.AccessToken,
+		&tok.RefreshToken,
+		&tok.TokenType,
+		&tok.Expiry,
+		&tok.CreatedAt,
+		&tok.UpdatedAt,
+	)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	return tok, nil
+}
+
+func (r *postgresOAuthRepo) DeleteToken(ctx context.Context, userID, provider string) error {
+	query := `DELETE FROM oauth_tokens WHERE user_id = $1 AND provider = $2`
+	_, err := r.db.ExecContext(ctx, query, userID, provider)
+	return err
+}
+
 // --- Memory Repository for Isolation Testing & Fallback ---
 
 // MemoryRepository provides a thread-safe in-memory implementation of Repository.
 type MemoryRepository struct {
-	users  map[string]*User
-	nodes  map[string]*StorageNodeRecord
-	files  map[string]*FileRecord
-	chunks map[string]*ChunkRecord
-	mu     sync.RWMutex
+	users       map[string]*User
+	nodes       map[string]*StorageNodeRecord
+	files       map[string]*FileRecord
+	chunks      map[string]*ChunkRecord
+	oauthTokens map[string]*OAuthTokenRecord
+	mu          sync.RWMutex
 }
 
 // NewMemoryRepository constructs a new MemoryRepository.
 func NewMemoryRepository() *MemoryRepository {
 	return &MemoryRepository{
-		users:  make(map[string]*User),
-		nodes:  make(map[string]*StorageNodeRecord),
-		files:  make(map[string]*FileRecord),
-		chunks: make(map[string]*ChunkRecord),
+		users:       make(map[string]*User),
+		nodes:       make(map[string]*StorageNodeRecord),
+		files:       make(map[string]*FileRecord),
+		chunks:      make(map[string]*ChunkRecord),
+		oauthTokens: make(map[string]*OAuthTokenRecord),
 	}
 }
 
@@ -523,6 +610,10 @@ func (m *MemoryRepository) Files() FileRepository {
 
 func (m *MemoryRepository) Chunks() ChunkRepository {
 	return &memChunkRepo{repo: m}
+}
+
+func (m *MemoryRepository) OAuthTokens() OAuthTokenRepository {
+	return &memOAuthRepo{repo: m}
 }
 
 type memUserRepo struct{ repo *MemoryRepository }
@@ -788,5 +879,57 @@ func (r *memChunkRepo) DeleteChunksByFile(ctx context.Context, fileID string) er
 			delete(r.repo.chunks, id)
 		}
 	}
+	return nil
+}
+
+type memOAuthRepo struct{ repo *MemoryRepository }
+
+func (r *memOAuthRepo) SaveToken(ctx context.Context, token *OAuthTokenRecord) error {
+	r.repo.mu.Lock()
+	defer r.repo.mu.Unlock()
+
+	key := token.UserID + ":" + token.Provider
+	now := time.Now().UTC()
+	if existing, ok := r.repo.oauthTokens[key]; ok {
+		if token.RefreshToken == "" {
+			token.RefreshToken = existing.RefreshToken
+		}
+		if token.ID == "" {
+			token.ID = existing.ID
+		}
+		token.CreatedAt = existing.CreatedAt
+	} else {
+		if token.ID == "" {
+			token.ID = fmt.Sprintf("tok_%d", now.UnixNano())
+		}
+		if token.CreatedAt.IsZero() {
+			token.CreatedAt = now
+		}
+	}
+	token.UpdatedAt = now
+	copy := *token
+	r.repo.oauthTokens[key] = &copy
+	return nil
+}
+
+func (r *memOAuthRepo) GetToken(ctx context.Context, userID, provider string) (*OAuthTokenRecord, error) {
+	r.repo.mu.RLock()
+	defer r.repo.mu.RUnlock()
+
+	key := userID + ":" + provider
+	tok, ok := r.repo.oauthTokens[key]
+	if !ok {
+		return nil, ErrNotFound
+	}
+	copy := *tok
+	return &copy, nil
+}
+
+func (r *memOAuthRepo) DeleteToken(ctx context.Context, userID, provider string) error {
+	r.repo.mu.Lock()
+	defer r.repo.mu.Unlock()
+
+	key := userID + ":" + provider
+	delete(r.repo.oauthTokens, key)
 	return nil
 }

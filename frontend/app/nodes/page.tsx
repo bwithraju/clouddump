@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { Server, HardDrive, CheckCircle2, AlertTriangle, RefreshCw, PowerOff, Power, ShieldAlert } from "lucide-react";
+import { Server, HardDrive, CheckCircle2, AlertTriangle, RefreshCw, PowerOff, Power, ShieldAlert, Cloud, PlusCircle } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { usePoolStats, useNodes } from "@/hooks/use-nodes";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -11,7 +11,14 @@ import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { formatBytes, formatDate } from "@/lib/utils";
-import { simulateNodeFailure, triggerReconcile } from "@/lib/api";
+import {
+  simulateNodeFailure,
+  triggerReconcile,
+  fetchGoogleOAuthStatus,
+  fetchGoogleAuthURL,
+  createGoogleDriveNode,
+  disconnectGoogleDrive,
+} from "@/lib/api";
 
 export default function StorageNodesPage() {
   const queryClient = useQueryClient();
@@ -19,6 +26,59 @@ export default function StorageNodesPage() {
   const { data: nodes, isLoading: nodesLoading, refetch: refetchNodes } = useNodes();
   const [togglingNodeId, setTogglingNodeId] = React.useState<string | null>(null);
   const [reconciling, setReconciling] = React.useState(false);
+  const [gdriveConnected, setGdriveConnected] = React.useState(false);
+  const [connecting, setConnecting] = React.useState(false);
+  const [creatingNode, setCreatingNode] = React.useState(false);
+
+  React.useEffect(() => {
+    fetchGoogleOAuthStatus().then((status) => {
+      setGdriveConnected(status.connected);
+    }).catch(() => {});
+  }, []);
+
+  const handleConnectGDrive = async () => {
+    try {
+      setConnecting(true);
+      const res = await fetchGoogleAuthURL();
+      if (!res.configured) {
+        alert("Google OAuth is not configured on the backend. Please set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET environment variables.");
+        return;
+      }
+      window.location.href = res.auth_url;
+    } catch (err: any) {
+      alert(`OAuth Error: ${err.message || err}`);
+    } finally {
+      setConnecting(false);
+    }
+  };
+
+  const handleCreateDriveNode = async () => {
+    try {
+      setCreatingNode(true);
+      await createGoogleDriveNode("Google Drive Primary");
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["nodes"] }),
+        queryClient.invalidateQueries({ queryKey: ["poolStats"] }),
+      ]);
+    } catch (err: any) {
+      alert(`Failed to create Google Drive node: ${err.message || err}`);
+    } finally {
+      setCreatingNode(false);
+    }
+  };
+
+  const handleDisconnectGDrive = async () => {
+    try {
+      await disconnectGoogleDrive();
+      setGdriveConnected(false);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["nodes"] }),
+        queryClient.invalidateQueries({ queryKey: ["poolStats"] }),
+      ]);
+    } catch (err: any) {
+      alert(`Failed to disconnect: ${err.message || err}`);
+    }
+  };
 
   const handleRefresh = async () => {
     await Promise.all([refetchStats(), refetchNodes()]);
@@ -169,6 +229,58 @@ export default function StorageNodesPage() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Cloud Storage Provider Integration */}
+      <Card className="border-indigo-900/50 bg-slate-900/40">
+        <CardHeader className="pb-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Cloud className="h-5 w-5 text-indigo-400" />
+              <CardTitle className="text-base font-semibold">Google Drive Storage Provider</CardTitle>
+            </div>
+            <Badge variant={gdriveConnected ? "success" : "outline"}>
+              {gdriveConnected ? "OAuth Linked" : "Not Connected"}
+            </Badge>
+          </div>
+          <CardDescription className="text-xs">
+            Connect Google Drive via OAuth 2.0 as an independent StorageProvider in your logical storage pool.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="flex flex-wrap items-center gap-3">
+            {!gdriveConnected ? (
+              <Button
+                size="sm"
+                onClick={handleConnectGDrive}
+                disabled={connecting}
+                className="bg-indigo-600 hover:bg-indigo-500 text-xs"
+              >
+                {connecting ? "Opening OAuth..." : "Connect Google Drive via OAuth"}
+              </Button>
+            ) : (
+              <>
+                <Button
+                  size="sm"
+                  onClick={handleCreateDriveNode}
+                  disabled={creatingNode}
+                  className="bg-emerald-600 hover:bg-emerald-500 text-xs flex items-center gap-1.5"
+                >
+                  <PlusCircle className="h-3.5 w-3.5" />
+                  {creatingNode ? "Adding Node..." : "Add Google Drive Node to Pool"}
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleDisconnectGDrive}
+                  className="text-xs border-rose-900/60 text-rose-300 hover:bg-rose-950/30"
+                >
+                  Disconnect Google Drive
+                </Button>
+              </>
+            )}
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Node Cards Grid */}
       <div>
