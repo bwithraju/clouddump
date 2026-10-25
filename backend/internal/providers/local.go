@@ -15,10 +15,11 @@ var validChunkIDRegex = regexp.MustCompile(`^[a-zA-Z0-9_\-]+$`)
 
 // LocalStorageProvider implements StorageProvider backed by a local filesystem directory.
 type LocalStorageProvider struct {
-	baseDir       string
-	totalCapacity int64
-	usedCapacity  int64
-	mu            sync.RWMutex
+	baseDir          string
+	totalCapacity    int64
+	usedCapacity     int64
+	simulatedOffline bool
+	mu               sync.RWMutex
 }
 
 // NewLocalStorageProvider initializes a local directory-backed storage provider.
@@ -50,6 +51,13 @@ func NewLocalStorageProvider(baseDir string, totalCapacityBytes int64) (*LocalSt
 // ProviderType returns "local".
 func (p *LocalStorageProvider) ProviderType() string {
 	return "local"
+}
+
+// SetSimulatedOffline toggles simulated outage state for testing failure scenarios.
+func (p *LocalStorageProvider) SetSimulatedOffline(offline bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.simulatedOffline = offline
 }
 
 // scanUsedBytes sums the sizes of all files in baseDir.
@@ -87,6 +95,13 @@ func (p *LocalStorageProvider) StoreChunk(ctx context.Context, chunkID string, r
 		return "", 0, ctx.Err()
 	default:
 	}
+
+	p.mu.RLock()
+	if p.simulatedOffline {
+		p.mu.RUnlock()
+		return "", 0, ErrNodeOffline
+	}
+	p.mu.RUnlock()
 
 	if err := p.validateChunkID(chunkID); err != nil {
 		return "", 0, err
@@ -167,6 +182,13 @@ func (p *LocalStorageProvider) GetChunk(ctx context.Context, objectID string) (i
 	default:
 	}
 
+	p.mu.RLock()
+	if p.simulatedOffline {
+		p.mu.RUnlock()
+		return nil, ErrNodeOffline
+	}
+	p.mu.RUnlock()
+
 	cleanName := filepath.Base(objectID)
 	if cleanName != objectID || objectID == "." || objectID == ".." {
 		return nil, fmt.Errorf("%w: invalid objectID path", ErrInvalidChunkID)
@@ -186,6 +208,13 @@ func (p *LocalStorageProvider) GetChunk(ctx context.Context, objectID string) (i
 
 // DeleteChunk permanently deletes a chunk file and restores available capacity.
 func (p *LocalStorageProvider) DeleteChunk(ctx context.Context, objectID string) error {
+	p.mu.RLock()
+	if p.simulatedOffline {
+		p.mu.RUnlock()
+		return ErrNodeOffline
+	}
+	p.mu.RUnlock()
+
 	cleanName := filepath.Base(objectID)
 	if cleanName != objectID || objectID == "." || objectID == ".." {
 		return fmt.Errorf("%w: invalid objectID path", ErrInvalidChunkID)
@@ -229,6 +258,9 @@ func (p *LocalStorageProvider) GetTotalCapacity(ctx context.Context) (int64, err
 func (p *LocalStorageProvider) GetAvailableCapacity(ctx context.Context) (int64, error) {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
+	if p.simulatedOffline {
+		return 0, ErrNodeOffline
+	}
 	available := p.totalCapacity - p.usedCapacity
 	if available < 0 {
 		return 0, nil
@@ -243,6 +275,13 @@ func (p *LocalStorageProvider) HealthCheck(ctx context.Context) (bool, error) {
 		return false, ctx.Err()
 	default:
 	}
+
+	p.mu.RLock()
+	if p.simulatedOffline {
+		p.mu.RUnlock()
+		return false, ErrNodeOffline
+	}
+	p.mu.RUnlock()
 
 	probePath := filepath.Join(p.baseDir, ".health_probe")
 	if err := os.WriteFile(probePath, []byte("ok"), 0644); err != nil {

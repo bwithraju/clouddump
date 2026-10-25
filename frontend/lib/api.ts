@@ -16,7 +16,7 @@ export interface FileRecord {
   mime_type: string;
   chunk_size: number;
   total_chunks: number;
-  status: "UPLOADING" | "COMPLETED" | "FAILED" | string;
+  status: "UPLOADING" | "COMPLETED" | "FAILED" | "DEGRADED" | string;
   created_at: string;
   updated_at: string;
 }
@@ -100,6 +100,43 @@ export async function fetchNodes(): Promise<NodeStats[]> {
   const res = await fetch(`${API_BASE_URL}/nodes`);
   if (!res.ok) {
     throw new Error(`Failed to fetch storage nodes: HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function simulateNodeFailure(
+  nodeId: string,
+  offline: boolean
+): Promise<{
+  node: NodeStats;
+  offline: boolean;
+  degraded_files: string[];
+  recovered_files: string[];
+}> {
+  const res = await fetch(`${API_BASE_URL}/nodes/${encodeURIComponent(nodeId)}/simulate-failure`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ offline }),
+  });
+  if (!res.ok) {
+    const errText = await res.text();
+    throw new Error(`Failed to update node status (${res.status}): ${errText}`);
+  }
+  return res.json();
+}
+
+export async function triggerReconcile(): Promise<{
+  offline_nodes: string[];
+  online_nodes: string[];
+  degraded_files: string[];
+  recovered_files: string[];
+}> {
+  const res = await fetch(`${API_BASE_URL}/nodes/reconcile`, {
+    method: "POST",
+  });
+  if (!res.ok) {
+    const errText = await res.text();
+    throw new Error(`Failed to reconcile nodes (${res.status}): ${errText}`);
   }
   return res.json();
 }

@@ -348,6 +348,11 @@ func (h *FileHandler) Download(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if file.Status == string(chunks.FileStatusDegraded) {
+		http.Error(w, "file is degraded: one or more storage nodes containing required chunks are currently offline", http.StatusServiceUnavailable)
+		return
+	}
+
 	if file.Status != string(chunks.FileStatusCompleted) {
 		http.Error(w, fmt.Sprintf("file is not available for download, current status: %s", file.Status), http.StatusBadRequest)
 		return
@@ -357,6 +362,15 @@ func (h *FileHandler) Download(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		http.Error(w, fmt.Sprintf("failed to retrieve chunks: %v", err), http.StatusInternalServerError)
 		return
+	}
+
+	// Verify all nodes holding chunks are online
+	for _, c := range chunkRecords {
+		node, err := h.storageManager.GetNode(c.StorageNodeID)
+		if err != nil || !node.IsOnline() {
+			http.Error(w, fmt.Sprintf("file is degraded: storage node %s is currently offline", c.StorageNodeID), http.StatusServiceUnavailable)
+			return
+		}
 	}
 
 	chunkMetas := make([]*chunks.ChunkMetadata, 0, len(chunkRecords))

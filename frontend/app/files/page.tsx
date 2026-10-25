@@ -161,6 +161,8 @@ export default function FileManagerPage() {
                             ? "success"
                             : file.status === "UPLOADING"
                             ? "warning"
+                            : file.status === "DEGRADED"
+                            ? "warning"
                             : "destructive"
                         }
                       >

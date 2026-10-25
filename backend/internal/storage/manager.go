@@ -7,6 +7,8 @@ import (
 	"io"
 	"sync"
 	"time"
+
+	"github.com/bwithraju/clouddump/backend/internal/database"
 )
 
 // PoolStats provides aggregated metrics across all registered storage nodes.
@@ -295,4 +297,94 @@ func (m *StorageManager) RunHealthChecks(ctx context.Context) map[string]bool {
 
 	wg.Wait()
 	return results
+}
+
+// SetNodeSimulatedOffline toggles simulated offline status for a specific node.
+func (m *StorageManager) SetNodeSimulatedOffline(nodeID string, offline bool) error {
+	node, err := m.GetNode(nodeID)
+	if err != nil {
+		return err
+	}
+	node.SetSimulatedOffline(offline)
+	return nil
+}
+
+// ReconcileResult details the impact of node health check evaluation on stored files.
+type ReconcileResult struct {
+	OfflineNodes   []string `json:"offline_nodes"`
+	OnlineNodes    []string `json:"online_nodes"`
+	DegradedFiles  []string `json:"degraded_files"`
+	RecoveredFiles []string `json:"recovered_files"`
+}
+
+// ReconcileNodeFailures probes all nodes and updates affected files' statuses in the database.
+func (m *StorageManager) ReconcileNodeFailures(ctx context.Context, repo database.Repository) (*ReconcileResult, error) {
+	healthResults := m.RunHealthChecks(ctx)
+
+	result := &ReconcileResult{
+		OfflineNodes:   make([]string, 0),
+		OnlineNodes:    make([]string, 0),
+		DegradedFiles:  make([]string, 0),
+		RecoveredFiles: make([]string, 0),
+	}
+
+	for nodeID, healthy := range healthResults {
+		if !healthy {
+			result.OfflineNodes = append(result.OfflineNodes, nodeID)
+		} else {
+			result.OnlineNodes = append(result.OnlineNodes, nodeID)
+		}
+	}
+
+	if repo == nil {
+		return result, nil
+	}
+
+	// 1. Identify files affected by offline nodes
+	degradedSet := make(map[string]bool)
+	for _, offlineNodeID := range result.OfflineNodes {
+		chunksOnNode, err := repo.Chunks().ListChunksByNode(ctx, offlineNodeID)
+		if err != nil {
+			continue
+		}
+		for _, c := range chunksOnNode {
+			degradedSet[c.FileID] = true
+		}
+	}
+
+	// Mark affected files as DEGRADED if currently COMPLETED
+	for fileID := range degradedSet {
+		file, err := repo.Files().GetFile(ctx, fileID)
+		if err == nil && file.Status == "COMPLETED" {
+			_ = repo.Files().UpdateFileStatus(ctx, fileID, "DEGRADED")
+			result.DegradedFiles = append(result.DegradedFiles, fileID)
+		}
+	}
+
+	// 2. Check currently DEGRADED files to see if their nodes are all back online
+	allFiles, err := repo.Files().ListFilesByUser(ctx, "default_user")
+	if err == nil {
+		for _, f := range allFiles {
+			if f.Status == "DEGRADED" && !degradedSet[f.ID] {
+				// Verify all chunks for this file are on online nodes
+				fileChunks, err := repo.Chunks().ListChunksByFile(ctx, f.ID)
+				if err == nil && len(fileChunks) > 0 {
+					allOnline := true
+					for _, c := range fileChunks {
+						node, err := m.GetNode(c.StorageNodeID)
+						if err != nil || !node.IsOnline() {
+							allOnline = false
+							break
+						}
+					}
+					if allOnline {
+						_ = repo.Files().UpdateFileStatus(ctx, f.ID, "COMPLETED")
+						result.RecoveredFiles = append(result.RecoveredFiles, f.ID)
+					}
+				}
+			}
+		}
+	}
+
+	return result, nil
 }

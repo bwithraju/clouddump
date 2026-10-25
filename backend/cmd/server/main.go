@@ -101,7 +101,7 @@ func main() {
 
 	// 5. Construct Handlers and Router
 	fileHandler := api.NewFileHandler(mgr, parallelUploader, fileReconstructor, repo, chunks.DefaultChunkSize)
-	nodesHandler := api.NewNodesHandler(mgr)
+	nodesHandler := api.NewNodesHandler(mgr, repo)
 	uploadManager := uploads.NewUploadManager(mgr, repo, chunks.DefaultChunkSize)
 	uploadsHandler := api.NewUploadsHandler(uploadManager)
 

@@ -56,6 +56,7 @@ type ChunkRepository interface {
 	CreateChunksBatch(ctx context.Context, chunks []*ChunkRecord) error
 	GetChunk(ctx context.Context, id string) (*ChunkRecord, error)
 	ListChunksByFile(ctx context.Context, fileID string) ([]*ChunkRecord, error)
+	ListChunksByNode(ctx context.Context, nodeID string) ([]*ChunkRecord, error)
 	UpdateChunkStatus(ctx context.Context, id string, status string) error
 	DeleteChunksByFile(ctx context.Context, fileID string) error
 }
@@ -380,6 +381,28 @@ func (r *postgresChunkRepo) ListChunksByFile(ctx context.Context, fileID string)
 	return chunks, rows.Err()
 }
 
+func (r *postgresChunkRepo) ListChunksByNode(ctx context.Context, nodeID string) ([]*ChunkRecord, error) {
+	query := `
+		SELECT id, file_id, chunk_index, size, checksum, storage_node_id, provider_object_id, status, created_at
+		FROM chunks WHERE storage_node_id = $1 ORDER BY chunk_index ASC
+	`
+	rows, err := r.db.QueryContext(ctx, query, nodeID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var chunks []*ChunkRecord
+	for rows.Next() {
+		var c ChunkRecord
+		if err := rows.Scan(&c.ID, &c.FileID, &c.ChunkIndex, &c.Size, &c.Checksum, &c.StorageNodeID, &c.ProviderObjectID, &c.Status, &c.CreatedAt); err != nil {
+			return nil, err
+		}
+		chunks = append(chunks, &c)
+	}
+	return chunks, rows.Err()
+}
+
 func (r *postgresChunkRepo) UpdateChunkStatus(ctx context.Context, id string, status string) error {
 	query := `UPDATE chunks SET status = $1 WHERE id = $2`
 	_, err := r.db.ExecContext(ctx, query, status, id)
@@ -645,6 +668,18 @@ func (r *memChunkRepo) ListChunksByFile(ctx context.Context, fileID string) ([]*
 	var list []*ChunkRecord
 	for _, c := range r.repo.chunks {
 		if c.FileID == fileID {
+			list = append(list, c)
+		}
+	}
+	return list, nil
+}
+
+func (r *memChunkRepo) ListChunksByNode(ctx context.Context, nodeID string) ([]*ChunkRecord, error) {
+	r.repo.mu.RLock()
+	defer r.repo.mu.RUnlock()
+	var list []*ChunkRecord
+	for _, c := range r.repo.chunks {
+		if c.StorageNodeID == nodeID {
 			list = append(list, c)
 		}
 	}

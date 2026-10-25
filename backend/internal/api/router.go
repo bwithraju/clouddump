@@ -69,6 +69,8 @@ func NewRouter(configs ...RouterConfig) http.Handler {
 			nh := cfg.NodesHandler
 			mux.HandleFunc("GET /api/nodes", nh.List)
 			mux.HandleFunc("GET /api/nodes/stats", nh.Stats)
+			mux.HandleFunc("POST /api/nodes/{id}/simulate-failure", nh.SimulateFailure)
+			mux.HandleFunc("POST /api/nodes/reconcile", nh.Reconcile)
 		}
 
 		// Register resumable upload endpoints if UploadsHandler is provided

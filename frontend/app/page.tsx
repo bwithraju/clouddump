@@ -23,6 +23,7 @@ export default function DashboardPage() {
   const usedPercent = totalCapacity > 0 ? Math.round((usedCapacity / totalCapacity) * 100) : 0;
   const nodeCount = stats?.node_count || 0;
   const onlineNodes = stats?.online_nodes || 0;
+  const offlineNodes = stats?.offline_nodes || 0;
 
   const recentFiles = files ? [...files].slice(0, 5) : [];
 
@@ -51,6 +52,22 @@ export default function DashboardPage() {
           </Link>
         </div>
       </div>
+
+      {/* Offline Alert Warning */}
+      {offlineNodes > 0 && (
+        <div className="rounded-lg border border-amber-900/70 bg-amber-950/30 p-4 flex items-start gap-3 text-amber-200">
+          <AlertTriangle className="h-5 w-5 text-amber-400 shrink-0 mt-0.5" />
+          <div className="space-y-1">
+            <div className="text-sm font-semibold">
+              Warning: {offlineNodes} storage {offlineNodes === 1 ? "node is" : "nodes are"} currently OFFLINE
+            </div>
+            <p className="text-xs text-amber-300/80">
+              One or more storage nodes are unavailable. Files whose chunks reside on offline nodes have transitioned to <span className="font-mono font-semibold">DEGRADED</span> status.
+              Go to <Link href="/nodes" className="underline font-semibold hover:text-white">Storage Nodes</Link> to inspect health or restore nodes.
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* Metric Cards Grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
@@ -146,7 +163,7 @@ export default function DashboardPage() {
                   <div key={node.id} className="rounded-lg border border-slate-800 bg-slate-950/60 p-3.5 space-y-2">
                     <div className="flex items-center justify-between">
                       <span className="font-medium text-sm text-slate-200">{node.name}</span>
-                      <Badge variant={node.status === "ONLINE" ? "success" : "destructive"}>
+                      <Badge variant={node.status === "ONLINE" ? "success" : node.status === "DEGRADED" ? "warning" : "destructive"}>
                         {node.status}
                       </Badge>
                     </div>
@@ -218,6 +235,8 @@ export default function DashboardPage() {
                           file.status === "COMPLETED"
                             ? "success"
                             : file.status === "UPLOADING"
+                            ? "warning"
+                            : file.status === "DEGRADED"
                             ? "warning"
                             : "destructive"
                         }

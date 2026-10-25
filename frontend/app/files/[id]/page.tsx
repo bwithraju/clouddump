@@ -81,6 +81,8 @@ export default function FileDetailsPage() {
                     ? "success"
                     : file.status === "UPLOADING"
                     ? "warning"
+                    : file.status === "DEGRADED"
+                    ? "warning"
                     : "destructive"
                 }
               >
@@ -94,7 +96,9 @@ export default function FileDetailsPage() {
         <div className="flex items-center gap-2">
           <Button
             onClick={() => downloadFile(file.id, file.filename)}
-            className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500"
+            disabled={file.status !== "COMPLETED"}
+            className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50"
+            title={file.status === "DEGRADED" ? "File is degraded: node offline" : "Download File"}
           >
             <Download className="h-4 w-4" />
             Download File
@@ -111,6 +115,19 @@ export default function FileDetailsPage() {
           </Button>
         </div>
       </div>
+
+      {/* Degraded Alert Banner */}
+      {file.status === "DEGRADED" && (
+        <div className="rounded-lg border border-amber-900/70 bg-amber-950/30 p-4 flex items-start gap-3 text-amber-200">
+          <AlertCircle className="h-5 w-5 text-amber-400 shrink-0 mt-0.5" />
+          <div className="space-y-1">
+            <div className="text-sm font-semibold">File in Degraded State</div>
+            <p className="text-xs text-amber-300/80">
+              One or more storage nodes containing required chunks are currently offline. Download is temporarily disabled until all underlying nodes are restored to prevent partial or corrupted file streams.
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* File Overview Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">

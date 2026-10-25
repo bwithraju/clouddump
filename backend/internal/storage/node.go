@@ -118,6 +118,28 @@ func (n *StorageNode) RefreshCapacity(ctx context.Context) error {
 	return nil
 }
 
+// SimulatedOfflineProvider defines optional provider capability to simulate outages.
+type SimulatedOfflineProvider interface {
+	SetSimulatedOffline(offline bool)
+}
+
+// SetSimulatedOffline toggles simulated outage state and updates node status accordingly.
+func (n *StorageNode) SetSimulatedOffline(offline bool) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+
+	if sp, ok := n.Provider.(SimulatedOfflineProvider); ok {
+		sp.SetSimulatedOffline(offline)
+	}
+
+	if offline {
+		n.Status = NodeStatusOffline
+	} else {
+		n.Status = NodeStatusOnline
+	}
+	n.LastHealthCheck = time.Now().UTC()
+}
+
 // CheckHealth probes the provider and updates status and timestamp.
 func (n *StorageNode) CheckHealth(ctx context.Context) (bool, error) {
 	n.mu.Lock()

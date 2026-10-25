@@ -56,6 +56,7 @@ type FileStatus string
 const (
 	FileStatusUploading FileStatus = "UPLOADING"
 	FileStatusCompleted FileStatus = "COMPLETED"
+	FileStatusDegraded  FileStatus = "DEGRADED"
 	FileStatusFailed    FileStatus = "FAILED"
 	FileStatusDeleting  FileStatus = "DELETING"
 	FileStatusDeleted   FileStatus = "DELETED"
