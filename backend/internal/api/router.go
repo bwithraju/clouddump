@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -25,6 +26,7 @@ type RouterConfig struct {
 	AuthService    *auth.AuthService
 	OAuthHandler   *OAuthHandler
 	JobsHandler    *JobsHandler
+	SystemHandler  *SystemHandler
 }
 
 // NewRouter sets up and returns the main HTTP handler for the CloudDump API.
@@ -136,6 +138,12 @@ func NewRouter(configs ...RouterConfig) http.Handler {
 			mux.HandleFunc("GET /api/jobs/{id}", wrapAuth(jh.Get))
 			mux.HandleFunc("POST /api/jobs/trigger", wrapAuth(jh.Trigger))
 		}
+
+		// Register System Telemetry & Activity endpoint if SystemHandler is provided
+		if cfg.SystemHandler != nil {
+			sh := cfg.SystemHandler
+			mux.HandleFunc("GET /api/system/activity", wrapAuth(sh.GetActivity))
+		}
 	}
 
 	var handler http.Handler = mux
@@ -143,7 +151,55 @@ func NewRouter(configs ...RouterConfig) http.Handler {
 		handler = auth.AuthenticateMiddleware(authService)(handler)
 	}
 
-	return withCORS(handler)
+	return withStructuredLogging(withCORS(handler))
+}
+
+type loggingResponseWriter struct {
+	http.ResponseWriter
+	statusCode   int
+	bytesWritten int64
+}
+
+func (lrw *loggingResponseWriter) WriteHeader(code int) {
+	lrw.statusCode = code
+	lrw.ResponseWriter.WriteHeader(code)
+}
+
+func (lrw *loggingResponseWriter) Write(b []byte) (int, error) {
+	n, err := lrw.ResponseWriter.Write(b)
+	lrw.bytesWritten += int64(n)
+	return n, err
+}
+
+// withStructuredLogging logs HTTP requests with structured attributes using slog.
+func withStructuredLogging(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		lrw := &loggingResponseWriter{ResponseWriter: w, statusCode: http.StatusOK}
+		next.ServeHTTP(lrw, r)
+		duration := time.Since(start)
+
+		userID := auth.GetEffectiveUserID(r)
+		attrs := []any{
+			slog.String("method", r.Method),
+			slog.String("path", r.URL.Path),
+			slog.Int("status", lrw.statusCode),
+			slog.Int64("bytes", lrw.bytesWritten),
+			slog.Duration("duration", duration),
+			slog.String("remote_ip", r.RemoteAddr),
+		}
+		if userID != "" {
+			attrs = append(attrs, slog.String("user_id", userID))
+		}
+
+		if lrw.statusCode >= 500 {
+			slog.Error("HTTP request failed", attrs...)
+		} else if lrw.statusCode >= 400 {
+			slog.Warn("HTTP client error", attrs...)
+		} else {
+			slog.Info("HTTP request completed", attrs...)
+		}
+	})
 }
 
 // withCORS adds CORS headers for frontend integration with support for credentials.

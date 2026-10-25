@@ -98,6 +98,46 @@ export interface SessionSummary {
   updated_at: string;
 }
 
+export interface SystemOperation {
+  id: string;
+  type: string;
+  entity: string;
+  status: "SUCCESS" | "RUNNING" | "FAILED" | "WARNING" | string;
+  details: string;
+  timestamp: string;
+}
+
+export interface FailedOperation {
+  id: string;
+  type: string;
+  entity: string;
+  reason: string;
+  severity: "HIGH" | "MEDIUM" | "LOW" | string;
+  timestamp: string;
+}
+
+export interface SystemActivityResponse {
+  uptime_seconds: number;
+  pool_stats: PoolStats;
+  total_files: number;
+  completed_files: number;
+  degraded_files: number;
+  failed_files: number;
+  active_uploads: number;
+  recent_operations: SystemOperation[];
+  failed_operations: FailedOperation[];
+}
+
+export interface DownloadState {
+  fileId: string;
+  filename: string;
+  status: "idle" | "downloading" | "completed" | "failed";
+  loadedBytes: number;
+  totalBytes: number;
+  percent: number;
+  error?: string;
+}
+
 // Authentication APIs
 export async function register(email: string, password: string, name?: string): Promise<AuthResponse> {
   const res = await fetch(`${API_BASE_URL}/auth/register`, {
@@ -311,6 +351,73 @@ export function downloadFile(id: string, filename: string): void {
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);
+}
+
+export async function downloadFileWithProgress(
+  id: string,
+  filename: string,
+  onProgress?: (loaded: number, total: number, percent: number) => void
+): Promise<void> {
+  const downloadUrl = `${API_BASE_URL}/files/${encodeURIComponent(id)}/download`;
+  const res = await fetch(downloadUrl, { credentials: "include" });
+  if (!res.ok) {
+    const errText = await res.text();
+    throw new Error(`Download failed (${res.status}): ${errText}`);
+  }
+
+  const contentLengthHeader = res.headers.get("Content-Length");
+  const total = contentLengthHeader ? parseInt(contentLengthHeader, 10) : 0;
+  let loaded = 0;
+
+  const reader = res.body?.getReader();
+  if (!reader) {
+    downloadFile(id, filename);
+    return;
+  }
+
+  const chunks: BlobPart[] = [];
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (value) {
+      chunks.push(value as unknown as BlobPart);
+      loaded += value.length;
+      if (onProgress && total > 0) {
+        onProgress(loaded, total, Math.round((loaded / total) * 100));
+      }
+    }
+  }
+
+  const blob = new Blob(chunks, { type: res.headers.get("Content-Type") || "application/octet-stream" });
+  const blobUrl = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = blobUrl;
+  link.setAttribute("download", filename);
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(blobUrl);
+}
+
+// System Telemetry & Monitoring APIs
+export async function fetchSystemActivity(): Promise<SystemActivityResponse> {
+  const res = await fetch(`${API_BASE_URL}/system/activity`, {
+    credentials: "include",
+  });
+  if (!res.ok) {
+    throw new Error(`Failed to fetch system activity: HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function fetchUploadSessions(): Promise<SessionSummary[]> {
+  const res = await fetch(`${API_BASE_URL}/uploads`, {
+    credentials: "include",
+  });
+  if (!res.ok) {
+    return [];
+  }
+  return res.json();
 }
 
 // Resumable Upload APIs

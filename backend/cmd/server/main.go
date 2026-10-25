@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -25,6 +26,15 @@ import (
 )
 
 func main() {
+	// Initialize structured logging (JSON by default, text if requested)
+	var logHandler slog.Handler
+	if os.Getenv("LOG_FORMAT") == "text" {
+		logHandler = slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo})
+	} else {
+		logHandler = slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo})
+	}
+	slog.SetDefault(slog.New(logHandler))
+
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
@@ -178,6 +188,7 @@ func main() {
 	defer jobQueue.Close()
 
 	jobsHandler := api.NewJobsHandler(jobQueue)
+	systemHandler := api.NewSystemHandler(time.Now().UTC(), mgr, repo, uploadManager, jobQueue)
 
 	// 7. Construct Handlers and Router
 	fileHandler := api.NewFileHandler(mgr, parallelUploader, fileReconstructor, repo, chunks.DefaultChunkSize)
@@ -192,6 +203,7 @@ func main() {
 		AuthService:    authService,
 		OAuthHandler:   oauthHandler,
 		JobsHandler:    jobsHandler,
+		SystemHandler:  systemHandler,
 	}
 
 	handler := api.NewRouter(routerConfig)
