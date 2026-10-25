@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"time"
+
+	"github.com/bwithraju/clouddump/backend/internal/auth"
 )
 
 // HealthResponse represents the health status of the CloudDump server.
@@ -19,6 +21,8 @@ type RouterConfig struct {
 	FileHandler    *FileHandler
 	NodesHandler   *NodesHandler
 	UploadsHandler *UploadsHandler
+	AuthHandler    *AuthHandler
+	AuthService    *auth.AuthService
 }
 
 // NewRouter sets up and returns the main HTTP handler for the CloudDump API.
@@ -34,7 +38,7 @@ func NewRouter(configs ...RouterConfig) http.Handler {
 		resp := HealthResponse{
 			Status:    "healthy",
 			Service:   "clouddump-backend",
-			Version:   "1.0.0-phase11",
+			Version:   "1.0.0-phase15",
 			Timestamp: time.Now().UTC(),
 		}
 
@@ -47,54 +51,94 @@ func NewRouter(configs ...RouterConfig) http.Handler {
 	mux.HandleFunc("GET /health", healthHandler)
 	mux.HandleFunc("GET /api/health", healthHandler)
 
+	var authService *auth.AuthService
+
 	if len(configs) > 0 {
 		cfg := configs[0]
+		authService = cfg.AuthService
+
+		// Auto-instantiate AuthHandler if AuthService provided but AuthHandler omitted
+		ah := cfg.AuthHandler
+		if ah == nil && authService != nil {
+			ah = NewAuthHandler(authService)
+		}
+
+		// Register Auth endpoints
+		if ah != nil {
+			mux.HandleFunc("POST /api/auth/register", ah.Register)
+			mux.HandleFunc("POST /api/auth/login", ah.Login)
+			mux.HandleFunc("POST /api/auth/logout", ah.Logout)
+			if authService != nil {
+				mux.HandleFunc("GET /api/auth/me", auth.RequireAuth(authService, ah.Me))
+			} else {
+				mux.HandleFunc("GET /api/auth/me", ah.Me)
+			}
+		}
+
+		wrapAuth := func(h http.HandlerFunc) http.HandlerFunc {
+			if authService != nil {
+				return auth.RequireAuth(authService, h)
+			}
+			return h
+		}
 
 		// Register file endpoints if FileHandler is provided
 		if cfg.FileHandler != nil {
 			fh := cfg.FileHandler
-			mux.HandleFunc("POST /api/files/upload", fh.Upload)
+			mux.HandleFunc("POST /api/files/upload", wrapAuth(fh.Upload))
 			mux.HandleFunc("GET /api/files/upload", func(w http.ResponseWriter, r *http.Request) {
 				http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 			})
-			mux.HandleFunc("GET /api/files", fh.List)
-			mux.HandleFunc("GET /api/files/{id}", fh.GetDetails)
-			mux.HandleFunc("GET /api/files/{id}/status", fh.GetStatus)
-			mux.HandleFunc("GET /api/files/{id}/download", fh.Download)
-			mux.HandleFunc("DELETE /api/files/{id}", fh.Delete)
+			mux.HandleFunc("GET /api/files", wrapAuth(fh.List))
+			mux.HandleFunc("GET /api/files/{id}", wrapAuth(fh.GetDetails))
+			mux.HandleFunc("GET /api/files/{id}/status", wrapAuth(fh.GetStatus))
+			mux.HandleFunc("GET /api/files/{id}/download", wrapAuth(fh.Download))
+			mux.HandleFunc("DELETE /api/files/{id}", wrapAuth(fh.Delete))
 		}
 
 		// Register node endpoints if NodesHandler is provided
 		if cfg.NodesHandler != nil {
 			nh := cfg.NodesHandler
-			mux.HandleFunc("GET /api/nodes", nh.List)
-			mux.HandleFunc("GET /api/nodes/stats", nh.Stats)
-			mux.HandleFunc("POST /api/nodes/{id}/simulate-failure", nh.SimulateFailure)
-			mux.HandleFunc("POST /api/nodes/reconcile", nh.Reconcile)
+			mux.HandleFunc("GET /api/nodes", wrapAuth(nh.List))
+			mux.HandleFunc("GET /api/nodes/stats", wrapAuth(nh.Stats))
+			mux.HandleFunc("POST /api/nodes/{id}/simulate-failure", wrapAuth(nh.SimulateFailure))
+			mux.HandleFunc("POST /api/nodes/reconcile", wrapAuth(nh.Reconcile))
 		}
 
 		// Register resumable upload endpoints if UploadsHandler is provided
 		if cfg.UploadsHandler != nil {
 			uh := cfg.UploadsHandler
-			mux.HandleFunc("POST /api/uploads", uh.InitSession)
-			mux.HandleFunc("GET /api/uploads", uh.ListSessions)
-			mux.HandleFunc("GET /api/uploads/{id}", uh.GetSession)
-			mux.HandleFunc("PUT /api/uploads/{id}/chunks/{index}", uh.UploadChunk)
-			mux.HandleFunc("POST /api/uploads/{id}/chunks/{index}", uh.UploadChunk)
-			mux.HandleFunc("DELETE /api/uploads/{id}", uh.CancelSession)
-			mux.HandleFunc("POST /api/uploads/{id}/cancel", uh.CancelSession)
+			mux.HandleFunc("POST /api/uploads", wrapAuth(uh.InitSession))
+			mux.HandleFunc("GET /api/uploads", wrapAuth(uh.ListSessions))
+			mux.HandleFunc("GET /api/uploads/{id}", wrapAuth(uh.GetSession))
+			mux.HandleFunc("PUT /api/uploads/{id}/chunks/{index}", wrapAuth(uh.UploadChunk))
+			mux.HandleFunc("POST /api/uploads/{id}/chunks/{index}", wrapAuth(uh.UploadChunk))
+			mux.HandleFunc("DELETE /api/uploads/{id}", wrapAuth(uh.CancelSession))
+			mux.HandleFunc("POST /api/uploads/{id}/cancel", wrapAuth(uh.CancelSession))
 		}
 	}
 
-	return withCORS(mux)
+	var handler http.Handler = mux
+	if authService != nil {
+		handler = auth.AuthenticateMiddleware(authService)(handler)
+	}
+
+	return withCORS(handler)
 }
 
-// withCORS adds CORS headers for frontend integration.
+// withCORS adds CORS headers for frontend integration with support for credentials.
 func withCORS(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
+		origin := r.Header.Get("Origin")
+		if origin != "" {
+			w.Header().Set("Access-Control-Allow-Origin", origin)
+			w.Header().Set("Access-Control-Allow-Credentials", "true")
+		} else {
+			w.Header().Set("Access-Control-Allow-Origin", "*")
+		}
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Filename, X-File-Size, X-User-ID")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Filename, X-File-Size, X-User-ID, X-Replication-Factor, Cookie")
+		w.Header().Set("Access-Control-Expose-Headers", "Content-Disposition, Content-Length, Set-Cookie")
 
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)

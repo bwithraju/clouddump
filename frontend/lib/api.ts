@@ -1,6 +1,19 @@
 export const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080/api";
 
+export interface User {
+  id: string;
+  email: string;
+  name: string;
+  created_at: string;
+}
+
+export interface AuthResponse {
+  user: User;
+  token?: string;
+  expires_at?: string;
+}
+
 export interface HealthCheckResponse {
   status: string;
   service: string;
@@ -85,9 +98,58 @@ export interface SessionSummary {
   updated_at: string;
 }
 
+// Authentication APIs
+export async function register(email: string, password: string, name?: string): Promise<AuthResponse> {
+  const res = await fetch(`${API_BASE_URL}/auth/register`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify({ email, password, name }),
+  });
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(err || `Registration failed: HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function login(email: string, password: string): Promise<AuthResponse> {
+  const res = await fetch(`${API_BASE_URL}/auth/login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify({ email, password }),
+  });
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(err || `Login failed: HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function logout(): Promise<void> {
+  await fetch(`${API_BASE_URL}/auth/logout`, {
+    method: "POST",
+    credentials: "include",
+  });
+}
+
+export async function fetchCurrentUser(): Promise<User | null> {
+  const res = await fetch(`${API_BASE_URL}/auth/me`, {
+    credentials: "include",
+  });
+  if (!res.ok) {
+    return null;
+  }
+  const data = await res.json();
+  return data.user || null;
+}
+
 // Health Check
 export async function fetchHealth(): Promise<HealthCheckResponse> {
-  const res = await fetch(`${API_BASE_URL}/health`);
+  const res = await fetch(`${API_BASE_URL}/health`, {
+    credentials: "include",
+  });
   if (!res.ok) {
     throw new Error(`Health check failed with HTTP ${res.status}`);
   }
@@ -96,7 +158,9 @@ export async function fetchHealth(): Promise<HealthCheckResponse> {
 
 // Storage Pool & Nodes
 export async function fetchPoolStats(): Promise<PoolStats> {
-  const res = await fetch(`${API_BASE_URL}/nodes/stats`);
+  const res = await fetch(`${API_BASE_URL}/nodes/stats`, {
+    credentials: "include",
+  });
   if (!res.ok) {
     throw new Error(`Failed to fetch storage pool stats: HTTP ${res.status}`);
   }
@@ -104,7 +168,9 @@ export async function fetchPoolStats(): Promise<PoolStats> {
 }
 
 export async function fetchNodes(): Promise<NodeStats[]> {
-  const res = await fetch(`${API_BASE_URL}/nodes`);
+  const res = await fetch(`${API_BASE_URL}/nodes`, {
+    credentials: "include",
+  });
   if (!res.ok) {
     throw new Error(`Failed to fetch storage nodes: HTTP ${res.status}`);
   }
@@ -123,6 +189,7 @@ export async function simulateNodeFailure(
   const res = await fetch(`${API_BASE_URL}/nodes/${encodeURIComponent(nodeId)}/simulate-failure`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
+    credentials: "include",
     body: JSON.stringify({ offline }),
   });
   if (!res.ok) {
@@ -140,6 +207,7 @@ export async function triggerReconcile(): Promise<{
 }> {
   const res = await fetch(`${API_BASE_URL}/nodes/reconcile`, {
     method: "POST",
+    credentials: "include",
   });
   if (!res.ok) {
     const errText = await res.text();
@@ -150,7 +218,9 @@ export async function triggerReconcile(): Promise<{
 
 // Files
 export async function fetchFiles(): Promise<FileRecord[]> {
-  const res = await fetch(`${API_BASE_URL}/files`);
+  const res = await fetch(`${API_BASE_URL}/files`, {
+    credentials: "include",
+  });
   if (!res.ok) {
     throw new Error(`Failed to list files: HTTP ${res.status}`);
   }
@@ -158,7 +228,9 @@ export async function fetchFiles(): Promise<FileRecord[]> {
 }
 
 export async function fetchFileDetails(id: string): Promise<FileDetailsResponse> {
-  const res = await fetch(`${API_BASE_URL}/files/${encodeURIComponent(id)}`);
+  const res = await fetch(`${API_BASE_URL}/files/${encodeURIComponent(id)}`, {
+    credentials: "include",
+  });
   if (!res.ok) {
     throw new Error(`Failed to load file details: HTTP ${res.status}`);
   }
@@ -168,6 +240,7 @@ export async function fetchFileDetails(id: string): Promise<FileDetailsResponse>
 export async function deleteFile(id: string): Promise<void> {
   const res = await fetch(`${API_BASE_URL}/files/${encodeURIComponent(id)}`, {
     method: "DELETE",
+    credentials: "include",
   });
   if (!res.ok) {
     throw new Error(`Failed to delete file: HTTP ${res.status}`);
@@ -194,6 +267,7 @@ export async function initResumableUpload(
   const res = await fetch(`${API_BASE_URL}/uploads`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
+    credentials: "include",
     body: JSON.stringify({
       filename,
       size,
@@ -209,7 +283,9 @@ export async function initResumableUpload(
 }
 
 export async function fetchUploadSession(uploadId: string): Promise<SessionSummary> {
-  const res = await fetch(`${API_BASE_URL}/uploads/${encodeURIComponent(uploadId)}`);
+  const res = await fetch(`${API_BASE_URL}/uploads/${encodeURIComponent(uploadId)}`, {
+    credentials: "include",
+  });
   if (!res.ok) {
     throw new Error(`Failed to fetch upload session: HTTP ${res.status}`);
   }
@@ -229,6 +305,7 @@ export async function uploadChunk(
         "Content-Type": "application/octet-stream",
         "Content-Length": chunkBlob.size.toString(),
       },
+      credentials: "include",
       body: chunkBlob,
     }
   );
@@ -242,6 +319,7 @@ export async function uploadChunk(
 export async function cancelResumableUpload(uploadId: string): Promise<void> {
   const res = await fetch(`${API_BASE_URL}/uploads/${encodeURIComponent(uploadId)}/cancel`, {
     method: "POST",
+    credentials: "include",
   });
   if (!res.ok) {
     throw new Error(`Failed to cancel upload session: HTTP ${res.status}`);
@@ -263,6 +341,7 @@ export function uploadFile(
     }
 
     xhr.open("POST", `${API_BASE_URL}/files/upload`, true);
+    xhr.withCredentials = true;
     xhr.setRequestHeader("X-Filename", file.name);
     xhr.setRequestHeader("X-File-Size", file.size.toString());
     xhr.setRequestHeader("Content-Type", file.type || "application/octet-stream");

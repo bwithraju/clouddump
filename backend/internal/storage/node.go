@@ -31,6 +31,7 @@ const (
 // NodeStats snapshot of node metrics.
 type NodeStats struct {
 	ID                string     `json:"id"`
+	UserID            string     `json:"user_id,omitempty"`
 	Name              string     `json:"name"`
 	ProviderType      string     `json:"provider_type"`
 	TotalCapacity     int64      `json:"total_capacity"`
@@ -43,6 +44,7 @@ type NodeStats struct {
 // StorageNode encapsulates a StorageProvider with node-level metadata, capacity tracking, and status.
 type StorageNode struct {
 	ID                string
+	UserID            string
 	Name              string
 	Provider          providers.StorageProvider
 	TotalCapacity     int64
@@ -193,6 +195,13 @@ func (n *StorageNode) IsOnline() bool {
 	return n.Status == NodeStatusOnline
 }
 
+// SetUserID updates the owner user ID of the storage node.
+func (n *StorageNode) SetUserID(userID string) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.UserID = userID
+}
+
 // GetStats returns a thread-safe copy of node metrics.
 func (n *StorageNode) GetStats() NodeStats {
 	n.mu.RLock()
@@ -200,6 +209,7 @@ func (n *StorageNode) GetStats() NodeStats {
 
 	return NodeStats{
 		ID:                n.ID,
+		UserID:            n.UserID,
 		Name:              n.Name,
 		ProviderType:      n.Provider.ProviderType(),
 		TotalCapacity:     n.TotalCapacity,

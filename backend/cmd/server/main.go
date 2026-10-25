@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/bwithraju/clouddump/backend/internal/api"
+	"github.com/bwithraju/clouddump/backend/internal/auth"
 	"github.com/bwithraju/clouddump/backend/internal/chunks"
 	"github.com/bwithraju/clouddump/backend/internal/database"
 	"github.com/bwithraju/clouddump/backend/internal/providers"
@@ -99,7 +100,12 @@ func main() {
 		log.Fatalf("Failed to initialize file reconstructor: %v", err)
 	}
 
-	// 5. Construct Handlers and Router
+	// 5. Initialize Auth Service & Handlers
+	sessionStore := auth.NewSessionStore(24 * time.Hour)
+	authService := auth.NewAuthService(repo.Users(), sessionStore)
+	authHandler := api.NewAuthHandler(authService)
+
+	// 6. Construct Handlers and Router
 	fileHandler := api.NewFileHandler(mgr, parallelUploader, fileReconstructor, repo, chunks.DefaultChunkSize)
 	nodesHandler := api.NewNodesHandler(mgr, repo)
 	uploadManager := uploads.NewUploadManager(mgr, repo, chunks.DefaultChunkSize)
@@ -109,6 +115,8 @@ func main() {
 		FileHandler:    fileHandler,
 		NodesHandler:   nodesHandler,
 		UploadsHandler: uploadsHandler,
+		AuthHandler:    authHandler,
+		AuthService:    authService,
 	}
 
 	handler := api.NewRouter(routerConfig)

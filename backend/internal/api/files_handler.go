@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/bwithraju/clouddump/backend/internal/auth"
 	"github.com/bwithraju/clouddump/backend/internal/chunks"
 	"github.com/bwithraju/clouddump/backend/internal/database"
 	"github.com/bwithraju/clouddump/backend/internal/storage"
@@ -60,7 +61,7 @@ func (h *FileHandler) Upload(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx := r.Context()
-	userID := r.Header.Get("X-User-ID")
+	userID := auth.GetEffectiveUserID(r)
 	if userID == "" {
 		userID = "default_user"
 	}
@@ -247,7 +248,7 @@ func (h *FileHandler) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	userID := r.Header.Get("X-User-ID")
+	userID := auth.GetEffectiveUserID(r)
 	if userID == "" {
 		userID = "default_user"
 	}
@@ -288,6 +289,12 @@ func (h *FileHandler) GetDetails(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		http.Error(w, fmt.Sprintf("database error: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	userID := auth.GetEffectiveUserID(r)
+	if userID != "" && file.UserID != "" && file.UserID != userID {
+		http.Error(w, "forbidden: access denied", http.StatusForbidden)
 		return
 	}
 
@@ -338,6 +345,12 @@ func (h *FileHandler) GetStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	userID := auth.GetEffectiveUserID(r)
+	if userID != "" && file.UserID != "" && file.UserID != userID {
+		http.Error(w, "forbidden: access denied", http.StatusForbidden)
+		return
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{
@@ -371,6 +384,12 @@ func (h *FileHandler) Download(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		http.Error(w, fmt.Sprintf("database error: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	userID := auth.GetEffectiveUserID(r)
+	if userID != "" && file.UserID != "" && file.UserID != userID {
+		http.Error(w, "forbidden: access denied", http.StatusForbidden)
 		return
 	}
 
@@ -467,6 +486,12 @@ func (h *FileHandler) Delete(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		http.Error(w, fmt.Sprintf("database error: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	userID := auth.GetEffectiveUserID(r)
+	if userID != "" && file.UserID != "" && file.UserID != userID {
+		http.Error(w, "forbidden: access denied", http.StatusForbidden)
 		return
 	}
 

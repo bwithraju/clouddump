@@ -106,6 +106,12 @@ func (m *StorageManager) ListNodes() []*StorageNode {
 
 // GetPoolStats computes the total, used, and available capacity across all online nodes.
 func (m *StorageManager) GetPoolStats(ctx context.Context) PoolStats {
+	return m.GetPoolStatsForUser(ctx, "")
+}
+
+// GetPoolStatsForUser computes pool metrics, filtering nodes accessible by the given user.
+// Nodes with an empty UserID are considered system/shared nodes accessible to all users.
+func (m *StorageManager) GetPoolStatsForUser(ctx context.Context, userID string) PoolStats {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
@@ -114,6 +120,10 @@ func (m *StorageManager) GetPoolStats(ctx context.Context) PoolStats {
 	}
 
 	for _, n := range m.nodes {
+		// Filter out nodes belonging to another user
+		if userID != "" && n.UserID != "" && n.UserID != userID {
+			continue
+		}
 		nodeStats := n.GetStats()
 		stats.Nodes = append(stats.Nodes, nodeStats)
 		stats.NodeCount++

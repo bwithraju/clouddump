@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/bwithraju/clouddump/backend/internal/auth"
 	"github.com/bwithraju/clouddump/backend/internal/chunks"
 	"github.com/bwithraju/clouddump/backend/internal/uploads"
 )
@@ -53,7 +54,7 @@ func (h *UploadsHandler) InitSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	userID := r.Header.Get("X-User-ID")
+	userID := auth.GetEffectiveUserID(r)
 	if userID == "" {
 		userID = "default_user"
 	}
@@ -96,6 +97,12 @@ func (h *UploadsHandler) GetSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	userID := auth.GetEffectiveUserID(r)
+	if userID != "" && session.UserID != "" && session.UserID != userID {
+		http.Error(w, "forbidden: access denied", http.StatusForbidden)
+		return
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(session.Summary())
@@ -124,6 +131,22 @@ func (h *UploadsHandler) UploadChunk(w http.ResponseWriter, r *http.Request) {
 
 	declaredSize := r.ContentLength
 
+	session, err := h.uploadManager.GetSession(uploadID)
+	if err != nil {
+		if errors.Is(err, uploads.ErrSessionNotFound) {
+			http.Error(w, err.Error(), http.StatusNotFound)
+			return
+		}
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	userID := auth.GetEffectiveUserID(r)
+	if userID != "" && session.UserID != "" && session.UserID != userID {
+		http.Error(w, "forbidden: access denied", http.StatusForbidden)
+		return
+	}
+
 	meta, err := h.uploadManager.StoreChunk(r.Context(), uploadID, chunkIndex, r.Body, declaredSize)
 	if err != nil {
 		if errors.Is(err, uploads.ErrSessionNotFound) {
@@ -142,7 +165,7 @@ func (h *UploadsHandler) UploadChunk(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	session, _ := h.uploadManager.GetSession(uploadID)
+	session, _ = h.uploadManager.GetSession(uploadID)
 	summary := session.Summary()
 
 	w.Header().Set("Content-Type", "application/json")
@@ -174,6 +197,22 @@ func (h *UploadsHandler) CancelSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	session, err := h.uploadManager.GetSession(uploadID)
+	if err != nil {
+		if errors.Is(err, uploads.ErrSessionNotFound) {
+			http.Error(w, "upload session not found", http.StatusNotFound)
+			return
+		}
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	userID := auth.GetEffectiveUserID(r)
+	if userID != "" && session.UserID != "" && session.UserID != userID {
+		http.Error(w, "forbidden: access denied", http.StatusForbidden)
+		return
+	}
+
 	if err := h.uploadManager.CancelSession(r.Context(), uploadID); err != nil {
 		if errors.Is(err, uploads.ErrSessionNotFound) {
 			http.Error(w, "upload session not found", http.StatusNotFound)
@@ -198,7 +237,10 @@ func (h *UploadsHandler) ListSessions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	userID := r.Header.Get("X-User-ID")
+	userID := auth.GetEffectiveUserID(r)
+	if userID == "" {
+		userID = "default_user"
+	}
 	sessions := h.uploadManager.ListSessions(userID)
 
 	summaries := make([]uploads.SessionSummary, 0, len(sessions))

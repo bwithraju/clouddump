@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/bwithraju/clouddump/backend/internal/auth"
 	"github.com/bwithraju/clouddump/backend/internal/database"
 	"github.com/bwithraju/clouddump/backend/internal/storage"
 )
@@ -30,7 +31,8 @@ func (h *NodesHandler) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	stats := h.storageManager.GetPoolStats(r.Context())
+	userID := auth.GetEffectiveUserID(r)
+	stats := h.storageManager.GetPoolStatsForUser(r.Context(), userID)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(stats.Nodes)
@@ -43,7 +45,8 @@ func (h *NodesHandler) Stats(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	stats := h.storageManager.GetPoolStats(r.Context())
+	userID := auth.GetEffectiveUserID(r)
+	stats := h.storageManager.GetPoolStatsForUser(r.Context(), userID)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(stats)
@@ -67,6 +70,18 @@ func (h *NodesHandler) SimulateFailure(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	node, err := h.storageManager.GetNode(nodeID)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("failed to find node: %v", err), http.StatusNotFound)
+		return
+	}
+
+	userID := auth.GetEffectiveUserID(r)
+	if userID != "" && node.UserID != "" && node.UserID != userID {
+		http.Error(w, "forbidden: access denied to storage node", http.StatusForbidden)
+		return
+	}
+
 	var req SimulateFailureRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, fmt.Sprintf("invalid payload: %v", err), http.StatusBadRequest)
@@ -81,7 +96,7 @@ func (h *NodesHandler) SimulateFailure(w http.ResponseWriter, r *http.Request) {
 	// Reconcile affected files and chunks
 	reconcileResult, _ := h.storageManager.ReconcileNodeFailures(r.Context(), h.repo)
 
-	node, _ := h.storageManager.GetNode(nodeID)
+	node, _ = h.storageManager.GetNode(nodeID)
 	nodeStats := node.GetStats()
 
 	w.Header().Set("Content-Type", "application/json")
