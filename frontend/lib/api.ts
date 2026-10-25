@@ -60,6 +60,24 @@ export interface PoolStats {
   nodes: NodeStats[];
 }
 
+export interface SessionSummary {
+  upload_id: string;
+  file_id: string;
+  filename: string;
+  total_size: number;
+  chunk_size: number;
+  total_chunks: number;
+  completed_count: number;
+  completed_indices: number[];
+  failed_count: number;
+  failed_chunks: Record<number, string>;
+  status: "INITIALIZED" | "UPLOADING" | "COMPLETED" | "FAILED" | "CANCELLED" | string;
+  progress_percent: number;
+  next_expected: number;
+  created_at: string;
+  updated_at: string;
+}
+
 // Health Check
 export async function fetchHealth(): Promise<HealthCheckResponse> {
   const res = await fetch(`${API_BASE_URL}/health`);
@@ -122,7 +140,71 @@ export function downloadFile(id: string, filename: string): void {
   document.body.removeChild(link);
 }
 
-// Streaming upload with real-time byte progress & cancellation
+// Resumable Upload APIs
+export async function initResumableUpload(
+  filename: string,
+  size: number,
+  mimeType: string = "application/octet-stream",
+  chunkSize: number = 2 * 1024 * 1024
+): Promise<SessionSummary> {
+  const res = await fetch(`${API_BASE_URL}/uploads`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      filename,
+      size,
+      mime_type: mimeType,
+      chunk_size: chunkSize,
+    }),
+  });
+  if (!res.ok) {
+    const errText = await res.text();
+    throw new Error(`Failed to init upload session (${res.status}): ${errText}`);
+  }
+  return res.json();
+}
+
+export async function fetchUploadSession(uploadId: string): Promise<SessionSummary> {
+  const res = await fetch(`${API_BASE_URL}/uploads/${encodeURIComponent(uploadId)}`);
+  if (!res.ok) {
+    throw new Error(`Failed to fetch upload session: HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function uploadChunk(
+  uploadId: string,
+  chunkIndex: number,
+  chunkBlob: Blob
+): Promise<any> {
+  const res = await fetch(
+    `${API_BASE_URL}/uploads/${encodeURIComponent(uploadId)}/chunks/${chunkIndex}`,
+    {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/octet-stream",
+        "Content-Length": chunkBlob.size.toString(),
+      },
+      body: chunkBlob,
+    }
+  );
+  if (!res.ok) {
+    const errText = await res.text();
+    throw new Error(`Failed to upload chunk ${chunkIndex} (${res.status}): ${errText}`);
+  }
+  return res.json();
+}
+
+export async function cancelResumableUpload(uploadId: string): Promise<void> {
+  const res = await fetch(`${API_BASE_URL}/uploads/${encodeURIComponent(uploadId)}/cancel`, {
+    method: "POST",
+  });
+  if (!res.ok) {
+    throw new Error(`Failed to cancel upload session: HTTP ${res.status}`);
+  }
+}
+
+// Direct raw streaming upload fallback
 export function uploadFile(
   file: File,
   onProgress?: (percent: number, loaded: number, total: number) => void,

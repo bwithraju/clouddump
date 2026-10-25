@@ -16,8 +16,9 @@ type HealthResponse struct {
 
 // RouterConfig defines dependency injection parameters for NewRouter.
 type RouterConfig struct {
-	FileHandler  *FileHandler
-	NodesHandler *NodesHandler
+	FileHandler    *FileHandler
+	NodesHandler   *NodesHandler
+	UploadsHandler *UploadsHandler
 }
 
 // NewRouter sets up and returns the main HTTP handler for the CloudDump API.
@@ -33,7 +34,7 @@ func NewRouter(configs ...RouterConfig) http.Handler {
 		resp := HealthResponse{
 			Status:    "healthy",
 			Service:   "clouddump-backend",
-			Version:   "1.0.0-phase10",
+			Version:   "1.0.0-phase11",
 			Timestamp: time.Now().UTC(),
 		}
 
@@ -68,6 +69,18 @@ func NewRouter(configs ...RouterConfig) http.Handler {
 			nh := cfg.NodesHandler
 			mux.HandleFunc("GET /api/nodes", nh.List)
 			mux.HandleFunc("GET /api/nodes/stats", nh.Stats)
+		}
+
+		// Register resumable upload endpoints if UploadsHandler is provided
+		if cfg.UploadsHandler != nil {
+			uh := cfg.UploadsHandler
+			mux.HandleFunc("POST /api/uploads", uh.InitSession)
+			mux.HandleFunc("GET /api/uploads", uh.ListSessions)
+			mux.HandleFunc("GET /api/uploads/{id}", uh.GetSession)
+			mux.HandleFunc("PUT /api/uploads/{id}/chunks/{index}", uh.UploadChunk)
+			mux.HandleFunc("POST /api/uploads/{id}/chunks/{index}", uh.UploadChunk)
+			mux.HandleFunc("DELETE /api/uploads/{id}", uh.CancelSession)
+			mux.HandleFunc("POST /api/uploads/{id}/cancel", uh.CancelSession)
 		}
 	}
 

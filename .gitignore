@@ -41,8 +41,8 @@ storage/node4/*
 !storage/node4/.gitkeep
 storage/runtime/*
 !storage/runtime/.gitkeep
-uploads/
-tmp/
+/uploads/
+/tmp/
 
 # IDE and OS
 .idea/

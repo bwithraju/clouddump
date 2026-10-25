@@ -17,6 +17,7 @@ import (
 	"github.com/bwithraju/clouddump/backend/internal/database"
 	"github.com/bwithraju/clouddump/backend/internal/providers"
 	"github.com/bwithraju/clouddump/backend/internal/storage"
+	"github.com/bwithraju/clouddump/backend/internal/uploads"
 )
 
 func main() {
@@ -100,10 +101,13 @@ func main() {
 	// 5. Construct Handlers and Router
 	fileHandler := api.NewFileHandler(mgr, chunkDistributor, fileReconstructor, repo, chunks.DefaultChunkSize)
 	nodesHandler := api.NewNodesHandler(mgr)
+	uploadManager := uploads.NewUploadManager(mgr, repo, chunks.DefaultChunkSize)
+	uploadsHandler := api.NewUploadsHandler(uploadManager)
 
 	routerConfig := api.RouterConfig{
-		FileHandler:  fileHandler,
-		NodesHandler: nodesHandler,
+		FileHandler:    fileHandler,
+		NodesHandler:   nodesHandler,
+		UploadsHandler: uploadsHandler,
 	}
 
 	handler := api.NewRouter(routerConfig)
