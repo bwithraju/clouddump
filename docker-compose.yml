@@ -41,6 +41,10 @@ services:
       - "${PORT:-8080}:8080"
     environment:
       - PORT=8080
+      - ENVIRONMENT=${ENVIRONMENT:-development}
+      - LOG_FORMAT=${LOG_FORMAT:-json}
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-http://localhost:3000}
+      - COOKIE_SECURE=${COOKIE_SECURE:-false}
       - DB_HOST=postgres
       - DB_PORT=5432
       - DB_USER=${DB_USER:-postgres}

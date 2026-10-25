@@ -23,6 +23,7 @@ type Repository interface {
 	Files() FileRepository
 	Chunks() ChunkRepository
 	OAuthTokens() OAuthTokenRepository
+	Ping(ctx context.Context) error
 }
 
 // OAuthTokenRepository interface.
@@ -98,6 +99,13 @@ func (r *PostgresRepository) Chunks() ChunkRepository {
 
 func (r *PostgresRepository) OAuthTokens() OAuthTokenRepository {
 	return &postgresOAuthRepo{db: r.db}
+}
+
+func (r *PostgresRepository) Ping(ctx context.Context) error {
+	if r.db == nil {
+		return errors.New("database connection is nil")
+	}
+	return r.db.PingContext(ctx)
 }
 
 // --- Postgres Implementations ---
@@ -614,6 +622,10 @@ func (m *MemoryRepository) Chunks() ChunkRepository {
 
 func (m *MemoryRepository) OAuthTokens() OAuthTokenRepository {
 	return &memOAuthRepo{repo: m}
+}
+
+func (m *MemoryRepository) Ping(ctx context.Context) error {
+	return nil
 }
 
 type memUserRepo struct{ repo *MemoryRepository }

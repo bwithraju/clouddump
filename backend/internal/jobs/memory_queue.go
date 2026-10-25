@@ -126,6 +126,16 @@ func (q *MemoryJobQueue) ListJobs(ctx context.Context, limit int) ([]*Job, error
 	return list, nil
 }
 
+// Ping verifies that the memory queue is active and not closed.
+func (q *MemoryJobQueue) Ping(ctx context.Context) error {
+	q.mu.RLock()
+	defer q.mu.RUnlock()
+	if q.closed {
+		return ErrQueueClosed
+	}
+	return nil
+}
+
 // Close closes the queue and stops dequeue channel.
 func (q *MemoryJobQueue) Close() error {
 	q.mu.Lock()

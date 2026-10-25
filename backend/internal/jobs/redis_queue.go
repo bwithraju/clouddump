@@ -147,6 +147,11 @@ func (q *RedisJobQueue) ListJobs(ctx context.Context, limit int) ([]*Job, error)
 	return jobs, nil
 }
 
+// Ping probes the Redis connection.
+func (q *RedisJobQueue) Ping(ctx context.Context) error {
+	return q.client.Ping(ctx).Err()
+}
+
 // Close closes the Redis client connection.
 func (q *RedisJobQueue) Close() error {
 	return q.client.Close()

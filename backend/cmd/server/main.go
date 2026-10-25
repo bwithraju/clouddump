@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -195,6 +196,17 @@ func main() {
 	nodesHandler := api.NewNodesHandler(mgr, repo)
 	uploadsHandler := api.NewUploadsHandler(uploadManager)
 
+	allowedOriginsStr := os.Getenv("ALLOWED_ORIGINS")
+	var allowedOrigins []string
+	if allowedOriginsStr != "" {
+		for _, o := range strings.Split(allowedOriginsStr, ",") {
+			trimmed := strings.TrimSpace(o)
+			if trimmed != "" {
+				allowedOrigins = append(allowedOrigins, trimmed)
+			}
+		}
+	}
+
 	routerConfig := api.RouterConfig{
 		FileHandler:    fileHandler,
 		NodesHandler:   nodesHandler,
@@ -204,6 +216,9 @@ func main() {
 		OAuthHandler:   oauthHandler,
 		JobsHandler:    jobsHandler,
 		SystemHandler:  systemHandler,
+		Repo:           repo,
+		JobQueue:       jobQueue,
+		AllowedOrigins: allowedOrigins,
 	}
 
 	handler := api.NewRouter(routerConfig)

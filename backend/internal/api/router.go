@@ -1,12 +1,17 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/bwithraju/clouddump/backend/internal/auth"
+	"github.com/bwithraju/clouddump/backend/internal/database"
+	"github.com/bwithraju/clouddump/backend/internal/jobs"
 )
 
 // HealthResponse represents the health status of the CloudDump server.
@@ -27,13 +32,17 @@ type RouterConfig struct {
 	OAuthHandler   *OAuthHandler
 	JobsHandler    *JobsHandler
 	SystemHandler  *SystemHandler
+	Repo           database.Repository
+	JobQueue       jobs.JobQueue
+	AllowedOrigins []string
 }
 
 // NewRouter sets up and returns the main HTTP handler for the CloudDump API.
 func NewRouter(configs ...RouterConfig) http.Handler {
 	mux := http.NewServeMux()
 
-	healthHandler := func(w http.ResponseWriter, r *http.Request) {
+	// Liveness Probe: GET /health and GET /api/health
+	livenessHandler := func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 			return
@@ -42,7 +51,7 @@ func NewRouter(configs ...RouterConfig) http.Handler {
 		resp := HealthResponse{
 			Status:    "healthy",
 			Service:   "clouddump-backend",
-			Version:   "1.0.0-phase15",
+			Version:   "1.0.0-prod",
 			Timestamp: time.Now().UTC(),
 		}
 
@@ -51,15 +60,72 @@ func NewRouter(configs ...RouterConfig) http.Handler {
 		_ = json.NewEncoder(w).Encode(resp)
 	}
 
-	// Register health endpoints
-	mux.HandleFunc("GET /health", healthHandler)
-	mux.HandleFunc("GET /api/health", healthHandler)
+	mux.HandleFunc("GET /health", livenessHandler)
+	mux.HandleFunc("GET /api/health", livenessHandler)
 
 	var authService *auth.AuthService
+	var allowedOrigins []string
 
 	if len(configs) > 0 {
 		cfg := configs[0]
 		authService = cfg.AuthService
+		allowedOrigins = cfg.AllowedOrigins
+
+		// Readiness Probe: GET /ready and GET /api/ready
+		readinessHandler := func(w http.ResponseWriter, r *http.Request) {
+			if r.Method != http.MethodGet {
+				http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+				return
+			}
+
+			ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
+			defer cancel()
+
+			checks := make(map[string]string)
+			allReady := true
+
+			if cfg.Repo != nil {
+				if err := cfg.Repo.Ping(ctx); err != nil {
+					checks["database"] = fmt.Sprintf("unhealthy: %v", err)
+					allReady = false
+				} else {
+					checks["database"] = "ready"
+				}
+			} else {
+				checks["database"] = "ready"
+			}
+
+			if cfg.JobQueue != nil {
+				if err := cfg.JobQueue.Ping(ctx); err != nil {
+					checks["job_queue"] = fmt.Sprintf("unhealthy: %v", err)
+					allReady = false
+				} else {
+					checks["job_queue"] = "ready"
+				}
+			} else {
+				checks["job_queue"] = "ready"
+			}
+
+			w.Header().Set("Content-Type", "application/json")
+			if !allReady {
+				w.WriteHeader(http.StatusServiceUnavailable)
+				_ = json.NewEncoder(w).Encode(map[string]interface{}{
+					"status":    "not_ready",
+					"checks":    checks,
+					"timestamp": time.Now().UTC(),
+				})
+				return
+			}
+
+			w.WriteHeader(http.StatusOK)
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
+				"status":    "ready",
+				"checks":    checks,
+				"timestamp": time.Now().UTC(),
+			})
+		}
+		mux.HandleFunc("GET /ready", readinessHandler)
+		mux.HandleFunc("GET /api/ready", readinessHandler)
 
 		// Auto-instantiate AuthHandler if AuthService provided but AuthHandler omitted
 		ah := cfg.AuthHandler
@@ -151,7 +217,7 @@ func NewRouter(configs ...RouterConfig) http.Handler {
 		handler = auth.AuthenticateMiddleware(authService)(handler)
 	}
 
-	return withStructuredLogging(withCORS(handler))
+	return withStructuredLogging(withCORS(handler, allowedOrigins))
 }
 
 type loggingResponseWriter struct {
@@ -202,21 +268,39 @@ func withStructuredLogging(next http.Handler) http.Handler {
 	})
 }
 
-// withCORS adds CORS headers for frontend integration with support for credentials.
-func withCORS(next http.Handler) http.Handler {
+// withCORS adds CORS headers for frontend integration with support for credentials and origin validation.
+func withCORS(next http.Handler, allowedOrigins []string) http.Handler {
+	allowedMap := make(map[string]bool)
+	for _, o := range allowedOrigins {
+		trimmed := strings.TrimSpace(o)
+		if trimmed != "" {
+			allowedMap[trimmed] = true
+		}
+	}
+
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		origin := r.Header.Get("Origin")
+		allowOrigin := false
+
 		if origin != "" {
-			w.Header().Set("Access-Control-Allow-Origin", origin)
-			w.Header().Set("Access-Control-Allow-Credentials", "true")
+			if len(allowedMap) == 0 || allowedMap["*"] || allowedMap[origin] {
+				allowOrigin = true
+				w.Header().Set("Access-Control-Allow-Origin", origin)
+				w.Header().Set("Access-Control-Allow-Credentials", "true")
+			}
 		} else {
 			w.Header().Set("Access-Control-Allow-Origin", "*")
 		}
+
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Filename, X-File-Size, X-User-ID, X-Replication-Factor, Cookie")
 		w.Header().Set("Access-Control-Expose-Headers", "Content-Disposition, Content-Length, Set-Cookie")
 
 		if r.Method == http.MethodOptions {
+			if origin != "" && !allowOrigin && len(allowedMap) > 0 && !allowedMap["*"] {
+				http.Error(w, "CORS origin not allowed", http.StatusForbidden)
+				return
+			}
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}

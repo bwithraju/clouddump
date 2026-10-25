@@ -28,6 +28,9 @@ type JobQueue interface {
 	// ListJobs returns the most recent jobs up to limit.
 	ListJobs(ctx context.Context, limit int) ([]*Job, error)
 
+	// Ping checks connectivity with the queue backend.
+	Ping(ctx context.Context) error
+
 	// Close terminates queue connections and workers gracefully.
 	Close() error
 }

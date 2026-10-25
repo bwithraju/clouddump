@@ -1,5 +1,5 @@
 -- CloudDump PostgreSQL Initial Schema Migration
--- Up Migration: users, storage_nodes, files, chunks
+-- Up Migration: users, storage_nodes, files, chunks, chunk_replicas, oauth_tokens
 
 CREATE TABLE IF NOT EXISTS users (
     id VARCHAR(64) PRIMARY KEY,
@@ -59,3 +59,30 @@ CREATE TABLE IF NOT EXISTS chunks (
 CREATE INDEX IF NOT EXISTS idx_chunks_file_id ON chunks(file_id);
 CREATE INDEX IF NOT EXISTS idx_chunks_storage_node_id ON chunks(storage_node_id);
 CREATE INDEX IF NOT EXISTS idx_chunks_status ON chunks(status);
+
+CREATE TABLE IF NOT EXISTS chunk_replicas (
+    id VARCHAR(128) PRIMARY KEY,
+    chunk_id VARCHAR(128) NOT NULL REFERENCES chunks(id) ON DELETE CASCADE,
+    storage_node_id VARCHAR(64) NOT NULL REFERENCES storage_nodes(id) ON DELETE RESTRICT,
+    provider_object_id VARCHAR(255) NOT NULL,
+    status VARCHAR(32) NOT NULL DEFAULT 'STORED',
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_chunk_replicas_chunk_id ON chunk_replicas(chunk_id);
+CREATE INDEX IF NOT EXISTS idx_chunk_replicas_storage_node_id ON chunk_replicas(storage_node_id);
+
+CREATE TABLE IF NOT EXISTS oauth_tokens (
+    id VARCHAR(64) PRIMARY KEY,
+    user_id VARCHAR(64) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    provider VARCHAR(64) NOT NULL,
+    access_token TEXT NOT NULL,
+    refresh_token TEXT NOT NULL,
+    token_type VARCHAR(64) NOT NULL DEFAULT 'Bearer',
+    expiry TIMESTAMP WITH TIME ZONE NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uq_user_provider UNIQUE (user_id, provider)
+);
+
+CREATE INDEX IF NOT EXISTS idx_oauth_tokens_user_id ON oauth_tokens(user_id);

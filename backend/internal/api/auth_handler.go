@@ -5,9 +5,21 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
 
 	"github.com/bwithraju/clouddump/backend/internal/auth"
 )
+
+// isSecureRequest determines whether cookies should have the Secure attribute.
+func isSecureRequest(r *http.Request) bool {
+	if os.Getenv("ENVIRONMENT") == "production" || os.Getenv("COOKIE_SECURE") == "true" {
+		return true
+	}
+	if r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https" {
+		return true
+	}
+	return false
+}
 
 // AuthHandler serves endpoints for registration, login, logout, and current user retrieval.
 type AuthHandler struct {
@@ -72,7 +84,7 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 		Value:    session.Token,
 		Path:     "/",
 		HttpOnly: true,
-		Secure:   false, // true for production HTTPS
+		Secure:   isSecureRequest(r),
 		SameSite: http.SameSiteLaxMode,
 		Expires:  session.ExpiresAt,
 	})
@@ -125,7 +137,7 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		Value:    session.Token,
 		Path:     "/",
 		HttpOnly: true,
-		Secure:   false,
+		Secure:   isSecureRequest(r),
 		SameSite: http.SameSiteLaxMode,
 		Expires:  session.ExpiresAt,
 	})
@@ -162,6 +174,8 @@ func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
 		Value:    "",
 		Path:     "/",
 		HttpOnly: true,
+		Secure:   isSecureRequest(r),
+		SameSite: http.SameSiteLaxMode,
 		MaxAge:   -1,
 	})
 
