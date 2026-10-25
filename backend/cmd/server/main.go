@@ -18,6 +18,7 @@ import (
 	"github.com/bwithraju/clouddump/backend/internal/providers"
 	"github.com/bwithraju/clouddump/backend/internal/storage"
 	"github.com/bwithraju/clouddump/backend/internal/uploads"
+	"github.com/bwithraju/clouddump/backend/internal/workers"
 )
 
 func main() {
@@ -87,10 +88,10 @@ func main() {
 		repo = database.NewMemoryRepository()
 	}
 
-	// 4. Initialize Core Pipeline Components
-	chunkDistributor, err := chunks.NewChunkDistributor(mgr, chunks.DefaultChunkSize)
+	// 4. Initialize Core Pipeline Components with Parallel Upload Worker Pool
+	parallelUploader, err := workers.NewParallelUploader(mgr, chunks.DefaultChunkSize, 0)
 	if err != nil {
-		log.Fatalf("Failed to initialize chunk distributor: %v", err)
+		log.Fatalf("Failed to initialize parallel uploader: %v", err)
 	}
 
 	fileReconstructor, err := chunks.NewFileReconstructor(mgr)
@@ -99,7 +100,7 @@ func main() {
 	}
 
 	// 5. Construct Handlers and Router
-	fileHandler := api.NewFileHandler(mgr, chunkDistributor, fileReconstructor, repo, chunks.DefaultChunkSize)
+	fileHandler := api.NewFileHandler(mgr, parallelUploader, fileReconstructor, repo, chunks.DefaultChunkSize)
 	nodesHandler := api.NewNodesHandler(mgr)
 	uploadManager := uploads.NewUploadManager(mgr, repo, chunks.DefaultChunkSize)
 	uploadsHandler := api.NewUploadsHandler(uploadManager)

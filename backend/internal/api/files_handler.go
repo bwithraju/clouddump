@@ -17,10 +17,15 @@ import (
 	"github.com/bwithraju/clouddump/backend/internal/storage"
 )
 
+// ChunkDistributorInterface abstracts streaming chunk distribution (sequential or parallel worker pool).
+type ChunkDistributorInterface interface {
+	Distribute(ctx context.Context, fileID string, source io.Reader, fileSize int64, callback chunks.ChunkProgressCallback) (*chunks.DistributionResult, error)
+}
+
 // FileHandler coordinates file HTTP endpoints and streaming operations.
 type FileHandler struct {
 	storageManager   *storage.StorageManager
-	chunkDistributor *chunks.ChunkDistributor
+	chunkDistributor ChunkDistributorInterface
 	reconstructor    *chunks.FileReconstructor
 	repo             database.Repository
 	defaultChunkSize int64
@@ -29,7 +34,7 @@ type FileHandler struct {
 // NewFileHandler constructs a new FileHandler.
 func NewFileHandler(
 	mgr *storage.StorageManager,
-	distributor *chunks.ChunkDistributor,
+	distributor ChunkDistributorInterface,
 	reconstructor *chunks.FileReconstructor,
 	repo database.Repository,
 	defaultChunkSize int64,
