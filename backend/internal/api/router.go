@@ -16,7 +16,8 @@ type HealthResponse struct {
 
 // RouterConfig defines dependency injection parameters for NewRouter.
 type RouterConfig struct {
-	FileHandler *FileHandler
+	FileHandler  *FileHandler
+	NodesHandler *NodesHandler
 }
 
 // NewRouter sets up and returns the main HTTP handler for the CloudDump API.
@@ -32,7 +33,7 @@ func NewRouter(configs ...RouterConfig) http.Handler {
 		resp := HealthResponse{
 			Status:    "healthy",
 			Service:   "clouddump-backend",
-			Version:   "1.0.0-phase9",
+			Version:   "1.0.0-phase10",
 			Timestamp: time.Now().UTC(),
 		}
 
@@ -45,18 +46,29 @@ func NewRouter(configs ...RouterConfig) http.Handler {
 	mux.HandleFunc("GET /health", healthHandler)
 	mux.HandleFunc("GET /api/health", healthHandler)
 
-	// Register file endpoints if FileHandler is provided
-	if len(configs) > 0 && configs[0].FileHandler != nil {
-		fh := configs[0].FileHandler
-		mux.HandleFunc("POST /api/files/upload", fh.Upload)
-		mux.HandleFunc("GET /api/files/upload", func(w http.ResponseWriter, r *http.Request) {
-			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		})
-		mux.HandleFunc("GET /api/files", fh.List)
-		mux.HandleFunc("GET /api/files/{id}", fh.GetDetails)
-		mux.HandleFunc("GET /api/files/{id}/status", fh.GetStatus)
-		mux.HandleFunc("GET /api/files/{id}/download", fh.Download)
-		mux.HandleFunc("DELETE /api/files/{id}", fh.Delete)
+	if len(configs) > 0 {
+		cfg := configs[0]
+
+		// Register file endpoints if FileHandler is provided
+		if cfg.FileHandler != nil {
+			fh := cfg.FileHandler
+			mux.HandleFunc("POST /api/files/upload", fh.Upload)
+			mux.HandleFunc("GET /api/files/upload", func(w http.ResponseWriter, r *http.Request) {
+				http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			})
+			mux.HandleFunc("GET /api/files", fh.List)
+			mux.HandleFunc("GET /api/files/{id}", fh.GetDetails)
+			mux.HandleFunc("GET /api/files/{id}/status", fh.GetStatus)
+			mux.HandleFunc("GET /api/files/{id}/download", fh.Download)
+			mux.HandleFunc("DELETE /api/files/{id}", fh.Delete)
+		}
+
+		// Register node endpoints if NodesHandler is provided
+		if cfg.NodesHandler != nil {
+			nh := cfg.NodesHandler
+			mux.HandleFunc("GET /api/nodes", nh.List)
+			mux.HandleFunc("GET /api/nodes/stats", nh.Stats)
+		}
 	}
 
 	return withCORS(mux)

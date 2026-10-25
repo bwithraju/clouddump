@@ -13,3 +13,19 @@ export function formatBytes(bytes: number, decimals = 2): string {
   const i = Math.floor(Math.log(bytes) / Math.log(k));
   return `${parseFloat((bytes / Math.pow(k, i)).toFixed(dm))} ${sizes[i]}`;
 }
+
+export function formatDate(dateStr: string): string {
+  if (!dateStr) return "-";
+  try {
+    const d = new Date(dateStr);
+    return d.toLocaleString("en-US", {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  } catch {
+    return dateStr;
+  }
+}

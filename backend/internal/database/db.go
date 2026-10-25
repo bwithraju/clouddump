@@ -29,9 +29,8 @@ func (c *Config) ConnectionString() string {
 		c.Host, c.Port, c.User, c.Password, c.DBName, ssl)
 }
 
-// Connect initializes and returns a pooled PostgreSQL database connection.
-func Connect(cfg Config) (*sql.DB, error) {
-	connStr := cfg.ConnectionString()
+// ConnectURL initializes a pooled PostgreSQL database connection from a connection string or URL.
+func ConnectURL(connStr string) (*sql.DB, error) {
 	db, err := sql.Open("postgres", connStr)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open postgres connection: %w", err)
@@ -50,6 +49,11 @@ func Connect(cfg Config) (*sql.DB, error) {
 	}
 
 	return db, nil
+}
+
+// Connect initializes and returns a pooled PostgreSQL database connection.
+func Connect(cfg Config) (*sql.DB, error) {
+	return ConnectURL(cfg.ConnectionString())
 }
 
 // SchemaDDL defines the core schema creation script for PostgreSQL.
