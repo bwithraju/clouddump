@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"log"
@@ -31,6 +32,9 @@ func main() {
 
 	// 1. Determine storage root
 	storageBase := os.Getenv("STORAGE_ROOT")
+	if storageBase == "" {
+		storageBase = os.Getenv("STORAGE_LOCAL_ROOT")
+	}
 	if storageBase == "" {
 		if _, err := os.Stat("storage"); err == nil {
 			storageBase = "storage"
@@ -72,11 +76,46 @@ func main() {
 		}
 	}
 
-	// 3. Initialize Database Repository (PostgreSQL if DATABASE_URL is set, else in-memory)
+	// 3. Initialize Database Repository (PostgreSQL if DATABASE_URL or DB_HOST is set, else in-memory)
 	var repo database.Repository
 	dbURL := os.Getenv("DATABASE_URL")
+	if dbURL == "" && os.Getenv("DB_HOST") != "" {
+		host := os.Getenv("DB_HOST")
+		port := os.Getenv("DB_PORT")
+		if port == "" {
+			port = "5432"
+		}
+		user := os.Getenv("DB_USER")
+		if user == "" {
+			user = "postgres"
+		}
+		password := os.Getenv("DB_PASSWORD")
+		dbname := os.Getenv("DB_NAME")
+		if dbname == "" {
+			dbname = "clouddump"
+		}
+		sslmode := os.Getenv("DB_SSLMODE")
+		if sslmode == "" {
+			sslmode = "disable"
+		}
+		dbURL = fmt.Sprintf("postgres://%s:%s@%s:%s/%s?sslmode=%s", user, password, host, port, dbname, sslmode)
+	}
+
 	if dbURL != "" {
-		db, err := database.ConnectURL(dbURL)
+		// Retry connecting to PostgreSQL with backoff (up to 5 attempts) to accommodate container readiness
+		var db *sql.DB
+		var err error
+		for attempt := 1; attempt <= 5; attempt++ {
+			db, err = database.ConnectURL(dbURL)
+			if err == nil {
+				break
+			}
+			if attempt < 5 {
+				log.Printf("[Info] PostgreSQL connection attempt %d/5 failed (%v), retrying in %ds...", attempt, err, attempt)
+				time.Sleep(time.Duration(attempt) * time.Second)
+			}
+		}
+
 		if err != nil {
 			log.Printf("[Warning] Failed to connect to PostgreSQL at %s (%v). Falling back to in-memory metadata repository.", dbURL, err)
 			repo = database.NewMemoryRepository()
@@ -86,7 +125,7 @@ func main() {
 			repo = database.NewPostgresRepository(db)
 		}
 	} else {
-		log.Println("DATABASE_URL not set; using fast in-memory metadata repository.")
+		log.Println("Neither DATABASE_URL nor DB_HOST set; using fast in-memory metadata repository.")
 		repo = database.NewMemoryRepository()
 	}
 
