@@ -20,6 +20,7 @@ import (
 // ChunkDistributorInterface abstracts streaming chunk distribution (sequential or parallel worker pool).
 type ChunkDistributorInterface interface {
 	Distribute(ctx context.Context, fileID string, source io.Reader, fileSize int64, callback chunks.ChunkProgressCallback) (*chunks.DistributionResult, error)
+	DistributeWithReplication(ctx context.Context, fileID string, source io.Reader, fileSize int64, replicationFactor int, callback chunks.ChunkProgressCallback) (*chunks.DistributionResult, error)
 }
 
 // FileHandler coordinates file HTTP endpoints and streaming operations.
@@ -136,6 +137,18 @@ func (h *FileHandler) Upload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Parse optional replication factor (default: 1, optional: 2 or more)
+	replicationFactor := 1
+	if rfStr := r.Header.Get("X-Replication-Factor"); rfStr != "" {
+		if rf, err := strconv.Atoi(rfStr); err == nil && rf >= 1 {
+			replicationFactor = rf
+		}
+	} else if rfStr := r.URL.Query().Get("replication_factor"); rfStr != "" {
+		if rf, err := strconv.Atoi(rfStr); err == nil && rf >= 1 {
+			replicationFactor = rf
+		}
+	}
+
 	// Step 1: Create initial file record in UPLOADING status
 	fileID := fmt.Sprintf("file_%d_%s", time.Now().UnixNano(), sanitizeID(filename))
 	totalChunks, err := chunks.CalculateTotalChunks(fileSize, h.defaultChunkSize)
@@ -160,8 +173,8 @@ func (h *FileHandler) Upload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Step 2: Stream and distribute chunks across storage nodes
-	result, err := h.chunkDistributor.Distribute(ctx, fileID, fileStream, fileSize, nil)
+	// Step 2: Stream and distribute chunks across storage nodes with replication
+	result, err := h.chunkDistributor.DistributeWithReplication(ctx, fileID, fileStream, fileSize, replicationFactor, nil)
 	if err != nil {
 		_ = h.repo.Files().UpdateFileStatus(context.Background(), fileID, string(chunks.FileStatusFailed))
 		if errors.Is(err, chunks.ErrInsufficientPoolStorage) || errors.Is(err, storage.ErrInsufficientNodeCapacity) {
@@ -172,9 +185,17 @@ func (h *FileHandler) Upload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Step 3: Batch persist chunk metadata into database
+	// Step 3: Batch persist chunk metadata into database including replicas
 	chunkRecords := make([]*database.ChunkRecord, 0, len(result.Chunks))
 	for _, chk := range result.Chunks {
+		var reps []database.ChunkReplicaRecord
+		for _, r := range chk.Replicas {
+			reps = append(reps, database.ChunkReplicaRecord{
+				StorageNodeID:    r.StorageNodeID,
+				ProviderObjectID: r.ProviderObjectID,
+				Status:           string(r.Status),
+			})
+		}
 		chunkRecords = append(chunkRecords, &database.ChunkRecord{
 			ID:               chk.ID,
 			FileID:           fileID,
@@ -184,6 +205,7 @@ func (h *FileHandler) Upload(w http.ResponseWriter, r *http.Request) {
 			StorageNodeID:    chk.StorageNodeID,
 			ProviderObjectID: chk.ProviderObjectID,
 			Status:           string(chk.Status),
+			Replicas:         reps,
 			CreatedAt:        chk.CreatedAt,
 		})
 	}
@@ -210,8 +232,9 @@ func (h *FileHandler) Upload(w http.ResponseWriter, r *http.Request) {
 		"size":         fileSize,
 		"mime_type":    mimeType,
 		"chunk_size":   h.defaultChunkSize,
-		"total_chunks": totalChunks,
-		"status":       fileRecord.Status,
+		"total_chunks":       totalChunks,
+		"replication_factor": result.ReplicationFactor,
+		"status":             fileRecord.Status,
 		"mapping":      result.Mapping,
 		"distribution": result.NodeDistribution,
 	})
@@ -274,10 +297,13 @@ func (h *FileHandler) GetDetails(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Compute node chunk distribution
+	// Compute node chunk distribution (primary + replicas)
 	distribution := make(map[string]int)
 	for _, c := range chunkRecords {
 		distribution[c.StorageNodeID]++
+		for _, rep := range c.Replicas {
+			distribution[rep.StorageNodeID]++
+		}
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -348,12 +374,7 @@ func (h *FileHandler) Download(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if file.Status == string(chunks.FileStatusDegraded) {
-		http.Error(w, "file is degraded: one or more storage nodes containing required chunks are currently offline", http.StatusServiceUnavailable)
-		return
-	}
-
-	if file.Status != string(chunks.FileStatusCompleted) {
+	if file.Status != string(chunks.FileStatusCompleted) && file.Status != string(chunks.FileStatusDegraded) {
 		http.Error(w, fmt.Sprintf("file is not available for download, current status: %s", file.Status), http.StatusBadRequest)
 		return
 	}
@@ -364,18 +385,29 @@ func (h *FileHandler) Download(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Verify all nodes holding chunks are online
+	// Verify all chunks have at least one online node (primary or replica)
 	for _, c := range chunkRecords {
-		node, err := h.storageManager.GetNode(c.StorageNodeID)
-		if err != nil || !node.IsOnline() {
-			http.Error(w, fmt.Sprintf("file is degraded: storage node %s is currently offline", c.StorageNodeID), http.StatusServiceUnavailable)
+		chunkAvailable := false
+		if node, err := h.storageManager.GetNode(c.StorageNodeID); err == nil && node.IsOnline() {
+			chunkAvailable = true
+		} else {
+			for _, rep := range c.Replicas {
+				if rNode, err := h.storageManager.GetNode(rep.StorageNodeID); err == nil && rNode.IsOnline() {
+					chunkAvailable = true
+					break
+				}
+			}
+		}
+
+		if !chunkAvailable {
+			http.Error(w, fmt.Sprintf("file is degraded: all storage nodes for chunk %d are currently offline", c.ChunkIndex), http.StatusServiceUnavailable)
 			return
 		}
 	}
 
 	chunkMetas := make([]*chunks.ChunkMetadata, 0, len(chunkRecords))
 	for _, c := range chunkRecords {
-		chunkMetas = append(chunkMetas, &chunks.ChunkMetadata{
+		meta := &chunks.ChunkMetadata{
 			ID:               c.ID,
 			FileID:           c.FileID,
 			ChunkIndex:       c.ChunkIndex,
@@ -385,7 +417,11 @@ func (h *FileHandler) Download(w http.ResponseWriter, r *http.Request) {
 			ProviderObjectID: c.ProviderObjectID,
 			Status:           chunks.ChunkStatus(c.Status),
 			CreatedAt:        c.CreatedAt,
-		})
+		}
+		for _, rep := range c.Replicas {
+			meta.AddReplica(rep.StorageNodeID, rep.ProviderObjectID, chunks.ChunkStatus(rep.Status))
+		}
+		chunkMetas = append(chunkMetas, meta)
 	}
 
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", file.Filename))
@@ -437,11 +473,14 @@ func (h *FileHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	// Mark status as DELETING
 	_ = h.repo.Files().UpdateFileStatus(ctx, fileID, string(chunks.FileStatusDeleting))
 
-	// Retrieve chunks and delete each chunk from its storage node
+	// Retrieve chunks and delete each chunk from its storage node (primary + replicas)
 	chunkRecords, err := h.repo.Chunks().ListChunksByFile(ctx, fileID)
 	if err == nil {
 		for _, c := range chunkRecords {
 			_ = h.storageManager.DeleteChunk(ctx, c.StorageNodeID, c.ProviderObjectID)
+			for _, rep := range c.Replicas {
+				_ = h.storageManager.DeleteChunk(ctx, rep.StorageNodeID, rep.ProviderObjectID)
+			}
 		}
 	}
 

@@ -71,7 +71,7 @@ func ResolveWorkerCount(requested int) int {
 	return DefaultWorkerCount
 }
 
-// NewParallelUploader initializes a ParallelUploader with controlled worker pool size.
+// NewParallelUploader initializes a concurrent uploader pool.
 func NewParallelUploader(mgr *storage.StorageManager, chunkSize int64, workerCount int) (*ParallelUploader, error) {
 	if mgr == nil {
 		return nil, errors.New("storage manager cannot be nil")
@@ -89,7 +89,7 @@ func NewParallelUploader(mgr *storage.StorageManager, chunkSize int64, workerCou
 	}, nil
 }
 
-// WorkerCount returns the active number of worker goroutines.
+// WorkerCount returns current active worker concurrency.
 func (u *ParallelUploader) WorkerCount() int {
 	u.mu.RLock()
 	defer u.mu.RUnlock()
@@ -103,9 +103,7 @@ func (u *ParallelUploader) SetWorkerCount(n int) {
 	u.workerCount = ResolveWorkerCount(n)
 }
 
-// Distribute processes chunks concurrently using a fixed worker pool of goroutines.
-// Chunks are read sequentially from the stream without buffering the whole file in RAM,
-// and dispatched to worker goroutines up to workerCount buffer capacity.
+// Distribute processes chunks concurrently using a fixed worker pool of goroutines with factor 1.
 func (u *ParallelUploader) Distribute(
 	ctx context.Context,
 	fileID string,
@@ -113,8 +111,23 @@ func (u *ParallelUploader) Distribute(
 	fileSize int64,
 	callback chunks.ChunkProgressCallback,
 ) (*chunks.DistributionResult, error) {
+	return u.DistributeWithReplication(ctx, fileID, source, fileSize, 1, callback)
+}
+
+// DistributeWithReplication processes chunks concurrently using workers, replicating across distinct nodes when replicationFactor > 1.
+func (u *ParallelUploader) DistributeWithReplication(
+	ctx context.Context,
+	fileID string,
+	source io.Reader,
+	fileSize int64,
+	replicationFactor int,
+	callback chunks.ChunkProgressCallback,
+) (*chunks.DistributionResult, error) {
 	if fileSize <= 0 {
 		return nil, chunks.ErrEmptyFile
+	}
+	if replicationFactor < 1 {
+		replicationFactor = 1
 	}
 
 	totalChunks, err := chunks.CalculateTotalChunks(fileSize, u.chunkSize)
@@ -122,11 +135,17 @@ func (u *ParallelUploader) Distribute(
 		return nil, err
 	}
 
-	// Pre-flight check on pool capacity
+	// Pre-flight check on pool capacity considering replication
+	totalRequired := fileSize * int64(replicationFactor)
 	poolStats := u.storageManager.GetPoolStats(ctx)
-	if poolStats.AvailableCapacity < fileSize {
+	if poolStats.AvailableCapacity < totalRequired {
 		return nil, fmt.Errorf("%w: file requires %d bytes, pool available %d bytes",
-			chunks.ErrInsufficientPoolStorage, fileSize, poolStats.AvailableCapacity)
+			chunks.ErrInsufficientPoolStorage, totalRequired, poolStats.AvailableCapacity)
+	}
+
+	if replicationFactor > poolStats.OnlineNodes {
+		return nil, fmt.Errorf("cannot satisfy replication factor %d: only %d online nodes available",
+			replicationFactor, poolStats.OnlineNodes)
 	}
 
 	u.mu.RLock()
@@ -161,11 +180,11 @@ func (u *ParallelUploader) Distribute(
 				default:
 				}
 
-				// Select and reserve node capacity atomically
+				// Select and reserve primary node capacity atomically
 				targetNode, err := u.storageManager.AllocateAndReserveNode(task.ExpectedSize)
 				if err != nil {
 					cancelProc()
-					results <- ChunkResult{Index: task.Index, Err: fmt.Errorf("worker %d failed allocating node: %w", workerID, err)}
+					results <- ChunkResult{Index: task.Index, Err: fmt.Errorf("worker %d failed allocating primary node: %w", workerID, err)}
 					continue
 				}
 
@@ -173,13 +192,14 @@ func (u *ParallelUploader) Distribute(
 
 				// Compute SHA-256 and store chunk
 				hasher := sha256.New()
-				teeReader := io.TeeReader(bytes.NewReader(task.Data), hasher)
+				hasher.Write(task.Data)
+				checksum := hex.EncodeToString(hasher.Sum(nil))
 
-				objectID, written, err := u.storageManager.StoreChunk(procCtx, targetNode.ID, chunkID, teeReader, task.ExpectedSize)
+				objectID, written, err := u.storageManager.StoreChunk(procCtx, targetNode.ID, chunkID, bytes.NewReader(task.Data), task.ExpectedSize)
 				if err != nil {
 					targetNode.ReleaseCapacity(task.ExpectedSize)
 					cancelProc()
-					results <- ChunkResult{Index: task.Index, Err: fmt.Errorf("worker %d failed storing chunk %d on %s: %w", workerID, task.Index, targetNode.ID, err)}
+					results <- ChunkResult{Index: task.Index, Err: fmt.Errorf("worker %d failed storing primary chunk %d on %s: %w", workerID, task.Index, targetNode.ID, err)}
 					continue
 				}
 
@@ -190,8 +210,6 @@ func (u *ParallelUploader) Distribute(
 					continue
 				}
 
-				checksum := hex.EncodeToString(hasher.Sum(nil))
-
 				meta := &chunks.ChunkMetadata{
 					ID:               chunkID,
 					FileID:           task.FileID,
@@ -201,7 +219,36 @@ func (u *ParallelUploader) Distribute(
 					StorageNodeID:    targetNode.ID,
 					ProviderObjectID: objectID,
 					Status:           chunks.ChunkStatusStored,
+					Replicas:         make([]*chunks.ChunkReplica, 0),
 					CreatedAt:        time.Now().UTC(),
+				}
+
+				// Store replicas if factor > 1
+				if replicationFactor > 1 {
+					excludedNodes := []string{targetNode.ID}
+					var repErr error
+					for r := 1; r < replicationFactor; r++ {
+						repNode, err := u.storageManager.AllocateAndReserveNode(task.ExpectedSize, excludedNodes...)
+						if err != nil {
+							repErr = fmt.Errorf("worker %d failed allocating replica %d for chunk %d: %w", workerID, r, task.Index, err)
+							break
+						}
+						excludedNodes = append(excludedNodes, repNode.ID)
+
+						repChunkID := fmt.Sprintf("chk_%s_%04d_rep%d", task.FileID, task.Index, r)
+						repObjID, repWritten, err := u.storageManager.StoreChunk(procCtx, repNode.ID, repChunkID, bytes.NewReader(task.Data), task.ExpectedSize)
+						if err != nil || repWritten != task.ExpectedSize {
+							repNode.ReleaseCapacity(task.ExpectedSize)
+							repErr = fmt.Errorf("worker %d failed storing replica %d of chunk %d: %w", workerID, r, task.Index, err)
+							break
+						}
+						meta.AddReplica(repNode.ID, repObjID, chunks.ChunkStatusStored)
+					}
+					if repErr != nil {
+						cancelProc()
+						results <- ChunkResult{Index: task.Index, Err: repErr}
+						continue
+					}
 				}
 
 				results <- ChunkResult{
@@ -286,6 +333,10 @@ func (u *ParallelUploader) Distribute(
 		}
 		mapping[res.Index][res.NodeID] = res.ObjectID
 		nodeDistribution[res.NodeID]++
+		for _, rep := range res.ChunkMeta.Replicas {
+			mapping[res.Index][rep.StorageNodeID] = rep.ProviderObjectID
+			nodeDistribution[rep.StorageNodeID]++
+		}
 		totalBytesUploaded += res.Written
 
 		if callback != nil && firstErr == nil {
@@ -301,11 +352,13 @@ func (u *ParallelUploader) Distribute(
 	}
 
 	if firstErr != nil {
-		// Roll back any chunks successfully written by other workers
 		log.Printf("[CloudDump] Parallel upload failed (%v). Rolling back stored chunks for %s...", firstErr, fileID)
 		for _, chunk := range storedChunks {
 			if chunk != nil {
 				_ = u.storageManager.DeleteChunk(context.Background(), chunk.StorageNodeID, chunk.ProviderObjectID)
+				for _, rep := range chunk.Replicas {
+					_ = u.storageManager.DeleteChunk(context.Background(), rep.StorageNodeID, rep.ProviderObjectID)
+				}
 			}
 		}
 		return nil, firstErr
@@ -314,10 +367,12 @@ func (u *ParallelUploader) Distribute(
 	// 5. Verify all chunks accounted for
 	for i, c := range storedChunks {
 		if c == nil {
-			// Roll back
 			for _, chunk := range storedChunks {
 				if chunk != nil {
 					_ = u.storageManager.DeleteChunk(context.Background(), chunk.StorageNodeID, chunk.ProviderObjectID)
+					for _, rep := range chunk.Replicas {
+						_ = u.storageManager.DeleteChunk(context.Background(), rep.StorageNodeID, rep.ProviderObjectID)
+					}
 				}
 			}
 			return nil, fmt.Errorf("parallel upload incomplete: missing chunk %d of %d", i, totalChunks)
@@ -325,13 +380,14 @@ func (u *ParallelUploader) Distribute(
 	}
 
 	return &chunks.DistributionResult{
-		FileID:           fileID,
-		TotalSize:        fileSize,
-		ChunkSize:        u.chunkSize,
-		TotalChunks:      totalChunks,
-		Status:           chunks.FileStatusCompleted,
-		Chunks:           storedChunks,
-		Mapping:          mapping,
-		NodeDistribution: nodeDistribution,
+		FileID:            fileID,
+		TotalSize:         fileSize,
+		ChunkSize:         u.chunkSize,
+		TotalChunks:       totalChunks,
+		ReplicationFactor: replicationFactor,
+		Status:            chunks.FileStatusCompleted,
+		Chunks:            storedChunks,
+		Mapping:           mapping,
+		NodeDistribution:  nodeDistribution,
 	}, nil
 }

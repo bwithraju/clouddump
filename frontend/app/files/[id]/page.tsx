@@ -230,7 +230,8 @@ export default function FileDetailsPage() {
               <TableRow>
                 <TableHead className="w-16">Index</TableHead>
                 <TableHead>Chunk ID</TableHead>
-                <TableHead>Storage Node</TableHead>
+                <TableHead>Primary Node</TableHead>
+                <TableHead>Replicas</TableHead>
                 <TableHead>Size</TableHead>
                 <TableHead>SHA-256 Checksum</TableHead>
                 <TableHead>Status</TableHead>
@@ -249,6 +250,19 @@ export default function FileDetailsPage() {
                     <Badge variant="outline" className="font-mono text-xs text-indigo-300 border-indigo-900/60">
                       {chunk.storage_node_id}
                     </Badge>
+                  </TableCell>
+                  <TableCell>
+                    {chunk.replicas && chunk.replicas.length > 0 ? (
+                      <div className="flex flex-wrap gap-1">
+                        {chunk.replicas.map((rep, idx) => (
+                          <Badge key={idx} variant="outline" className="font-mono text-xs text-emerald-300 border-emerald-900/60">
+                            {rep.storage_node_id}
+                          </Badge>
+                        ))}
+                      </div>
+                    ) : (
+                      <span className="text-xs text-slate-500 font-mono">None</span>
+                    )}
                   </TableCell>
                   <TableCell className="font-mono text-xs">{formatBytes(chunk.size)}</TableCell>
                   <TableCell className="font-mono text-xs text-slate-400 truncate max-w-xs" title={chunk.checksum}>

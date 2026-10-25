@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"sort"
 	"sync"
 	"time"
 )
@@ -305,7 +306,20 @@ func (r *postgresChunkRepo) CreateChunk(ctx context.Context, chunk *ChunkRecord)
 	_, err := r.db.ExecContext(ctx, query,
 		chunk.ID, chunk.FileID, chunk.ChunkIndex, chunk.Size, chunk.Checksum,
 		chunk.StorageNodeID, chunk.ProviderObjectID, chunk.Status, chunk.CreatedAt)
-	return err
+	if err != nil {
+		return err
+	}
+
+	for idx, rep := range chunk.Replicas {
+		repID := fmt.Sprintf("%s_rep_%d", chunk.ID, idx)
+		repQuery := `
+			INSERT INTO chunk_replicas (id, chunk_id, storage_node_id, provider_object_id, status, created_at)
+			VALUES ($1, $2, $3, $4, $5, $6)
+		`
+		_, _ = r.db.ExecContext(ctx, repQuery, repID, chunk.ID, rep.StorageNodeID, rep.ProviderObjectID, rep.Status, chunk.CreatedAt)
+	}
+
+	return nil
 }
 
 func (r *postgresChunkRepo) CreateChunksBatch(ctx context.Context, chunks []*ChunkRecord) error {
@@ -330,6 +344,15 @@ func (r *postgresChunkRepo) CreateChunksBatch(ctx context.Context, chunks []*Chu
 	}
 	defer stmt.Close()
 
+	repStmt, err := tx.PrepareContext(ctx, `
+		INSERT INTO chunk_replicas (id, chunk_id, storage_node_id, provider_object_id, status, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6)
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to prepare batch replica statement: %w", err)
+	}
+	defer repStmt.Close()
+
 	now := time.Now().UTC()
 	for _, chk := range chunks {
 		chk.CreatedAt = now
@@ -337,6 +360,13 @@ func (r *postgresChunkRepo) CreateChunksBatch(ctx context.Context, chunks []*Chu
 			chk.ID, chk.FileID, chk.ChunkIndex, chk.Size, chk.Checksum,
 			chk.StorageNodeID, chk.ProviderObjectID, chk.Status, chk.CreatedAt); err != nil {
 			return fmt.Errorf("failed inserting chunk %d in batch: %w", chk.ChunkIndex, err)
+		}
+
+		for idx, rep := range chk.Replicas {
+			repID := fmt.Sprintf("%s_rep_%d", chk.ID, idx)
+			if _, err := repStmt.ExecContext(ctx, repID, chk.ID, rep.StorageNodeID, rep.ProviderObjectID, rep.Status, now); err != nil {
+				return fmt.Errorf("failed inserting replica %d for chunk %d: %w", idx, chk.ChunkIndex, err)
+			}
 		}
 	}
 
@@ -356,6 +386,18 @@ func (r *postgresChunkRepo) GetChunk(ctx context.Context, id string) (*ChunkReco
 		}
 		return nil, err
 	}
+
+	repRows, err := r.db.QueryContext(ctx, `SELECT storage_node_id, provider_object_id, status FROM chunk_replicas WHERE chunk_id = $1`, id)
+	if err == nil {
+		defer repRows.Close()
+		for repRows.Next() {
+			var rep ChunkReplicaRecord
+			if err := repRows.Scan(&rep.StorageNodeID, &rep.ProviderObjectID, &rep.Status); err == nil {
+				c.Replicas = append(c.Replicas, rep)
+			}
+		}
+	}
+
 	return &c, nil
 }
 
@@ -378,13 +420,30 @@ func (r *postgresChunkRepo) ListChunksByFile(ctx context.Context, fileID string)
 		}
 		chunks = append(chunks, &c)
 	}
+
+	// Populate replicas
+	for _, chk := range chunks {
+		repRows, err := r.db.QueryContext(ctx, `SELECT storage_node_id, provider_object_id, status FROM chunk_replicas WHERE chunk_id = $1`, chk.ID)
+		if err == nil {
+			for repRows.Next() {
+				var rep ChunkReplicaRecord
+				if err := repRows.Scan(&rep.StorageNodeID, &rep.ProviderObjectID, &rep.Status); err == nil {
+					chk.Replicas = append(chk.Replicas, rep)
+				}
+			}
+			repRows.Close()
+		}
+	}
+
 	return chunks, rows.Err()
 }
 
 func (r *postgresChunkRepo) ListChunksByNode(ctx context.Context, nodeID string) ([]*ChunkRecord, error) {
 	query := `
 		SELECT id, file_id, chunk_index, size, checksum, storage_node_id, provider_object_id, status, created_at
-		FROM chunks WHERE storage_node_id = $1 ORDER BY chunk_index ASC
+		FROM chunks
+		WHERE storage_node_id = $1 OR id IN (SELECT chunk_id FROM chunk_replicas WHERE storage_node_id = $1)
+		ORDER BY chunk_index ASC
 	`
 	rows, err := r.db.QueryContext(ctx, query, nodeID)
 	if err != nil {
@@ -400,6 +459,20 @@ func (r *postgresChunkRepo) ListChunksByNode(ctx context.Context, nodeID string)
 		}
 		chunks = append(chunks, &c)
 	}
+
+	for _, chk := range chunks {
+		repRows, err := r.db.QueryContext(ctx, `SELECT storage_node_id, provider_object_id, status FROM chunk_replicas WHERE chunk_id = $1`, chk.ID)
+		if err == nil {
+			for repRows.Next() {
+				var rep ChunkReplicaRecord
+				if err := repRows.Scan(&rep.StorageNodeID, &rep.ProviderObjectID, &rep.Status); err == nil {
+					chk.Replicas = append(chk.Replicas, rep)
+				}
+			}
+			repRows.Close()
+		}
+	}
+
 	return chunks, rows.Err()
 }
 
@@ -671,6 +744,9 @@ func (r *memChunkRepo) ListChunksByFile(ctx context.Context, fileID string) ([]*
 			list = append(list, c)
 		}
 	}
+	sort.Slice(list, func(i, j int) bool {
+		return list[i].ChunkIndex < list[j].ChunkIndex
+	})
 	return list, nil
 }
 
@@ -681,6 +757,13 @@ func (r *memChunkRepo) ListChunksByNode(ctx context.Context, nodeID string) ([]*
 	for _, c := range r.repo.chunks {
 		if c.StorageNodeID == nodeID {
 			list = append(list, c)
+			continue
+		}
+		for _, rep := range c.Replicas {
+			if rep.StorageNodeID == nodeID {
+				list = append(list, c)
+				break
+			}
 		}
 	}
 	return list, nil

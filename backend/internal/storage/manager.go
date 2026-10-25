@@ -366,7 +366,7 @@ func (m *StorageManager) ReconcileNodeFailures(ctx context.Context, repo databas
 	if err == nil {
 		for _, f := range allFiles {
 			if f.Status == "DEGRADED" && !degradedSet[f.ID] {
-				// Verify all chunks for this file are on online nodes
+				// Verify all chunks and replicas for this file are on online nodes
 				fileChunks, err := repo.Chunks().ListChunksByFile(ctx, f.ID)
 				if err == nil && len(fileChunks) > 0 {
 					allOnline := true
@@ -375,6 +375,13 @@ func (m *StorageManager) ReconcileNodeFailures(ctx context.Context, repo databas
 						if err != nil || !node.IsOnline() {
 							allOnline = false
 							break
+						}
+						for _, rep := range c.Replicas {
+							repNode, err := m.GetNode(rep.StorageNodeID)
+							if err != nil || !repNode.IsOnline() {
+								allOnline = false
+								break
+							}
 						}
 					}
 					if allOnline {

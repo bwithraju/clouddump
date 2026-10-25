@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"hash"
 	"io"
+	"log"
 	"sort"
 
 	"github.com/bwithraju/clouddump/backend/internal/storage"
@@ -107,6 +108,44 @@ func OrderAndValidateChunks(chunkList []*ChunkMetadata) ([]*ChunkMetadata, error
 	return ordered, nil
 }
 
+// RetrieveChunkStream attempts to open a streaming read handle for the chunk,
+// querying the primary storage node first and automatically falling back to replicas
+// if the primary node is offline or returns an error.
+func (r *FileReconstructor) RetrieveChunkStream(ctx context.Context, chunk *ChunkMetadata) (io.ReadCloser, string, error) {
+	if chunk == nil {
+		return nil, "", errors.New("cannot retrieve nil chunk")
+	}
+
+	// 1. Attempt primary node if online
+	primaryNode, err := r.storageManager.GetNode(chunk.StorageNodeID)
+	if err == nil && primaryNode.IsOnline() {
+		rc, err := r.storageManager.GetChunk(ctx, chunk.StorageNodeID, chunk.ProviderObjectID)
+		if err == nil {
+			return rc, chunk.StorageNodeID, nil
+		}
+		log.Printf("[CloudDump] Primary node %s failed to get chunk %d: %v. Attempting replicas...", chunk.StorageNodeID, chunk.ChunkIndex, err)
+	}
+
+	// 2. Attempt replicas in order
+	for _, replica := range chunk.Replicas {
+		if replica == nil {
+			continue
+		}
+		repNode, err := r.storageManager.GetNode(replica.StorageNodeID)
+		if err == nil && repNode.IsOnline() {
+			rc, err := r.storageManager.GetChunk(ctx, replica.StorageNodeID, replica.ProviderObjectID)
+			if err == nil {
+				log.Printf("[CloudDump] Successfully retrieved chunk %d from replica node %s (object: %s)",
+					chunk.ChunkIndex, replica.StorageNodeID, replica.ProviderObjectID)
+				return rc, replica.StorageNodeID, nil
+			}
+		}
+	}
+
+	return nil, "", fmt.Errorf("%w: chunk index %d (node %s, object %s) unavailable and no online replicas succeeded",
+		ErrMissingChunk, chunk.ChunkIndex, chunk.StorageNodeID, chunk.ProviderObjectID)
+}
+
 // ReconstructTo streams the reconstructed file directly into dest in chunk_index order.
 // Verifies SHA-256 checksum for each chunk as it streams.
 // If any chunk is corrupted, missing, or altered, it halts and returns a clear error.
@@ -129,11 +168,10 @@ func (r *FileReconstructor) ReconstructTo(
 		default:
 		}
 
-		// Retrieve chunk from its designated storage node
-		chunkRC, err := r.storageManager.GetChunk(ctx, chunk.StorageNodeID, chunk.ProviderObjectID)
+		// Retrieve chunk from primary node or online replica
+		chunkRC, _, err := r.RetrieveChunkStream(ctx, chunk)
 		if err != nil {
-			return totalWritten, fmt.Errorf("%w: chunk index %d (node %s, object %s): %v",
-				ErrMissingChunk, chunk.ChunkIndex, chunk.StorageNodeID, chunk.ProviderObjectID, err)
+			return totalWritten, err
 		}
 
 		// Wrap in verifying reader to validate SHA-256 on the fly
@@ -166,11 +204,11 @@ func (r *FileReconstructor) ReconstructTo(
 
 // ReconstructedReader provides an io.ReadCloser that lazily reads and verifies across distributed chunks sequentially.
 type ReconstructedReader struct {
-	ctx            context.Context
-	storageManager *storage.StorageManager
-	chunks         []*ChunkMetadata
-	currentIndex   int
-	currentReader  io.ReadCloser
+	ctx           context.Context
+	reconstructor *FileReconstructor
+	chunks        []*ChunkMetadata
+	currentIndex  int
+	currentReader io.ReadCloser
 }
 
 // NewReconstructedReader creates a streaming ReadCloser over all chunks with on-the-fly checksum validation.
@@ -184,10 +222,10 @@ func (r *FileReconstructor) NewReconstructedReader(
 	}
 
 	return &ReconstructedReader{
-		ctx:            ctx,
-		storageManager: r.storageManager,
-		chunks:         orderedChunks,
-		currentIndex:   0,
+		ctx:           ctx,
+		reconstructor: r,
+		chunks:        orderedChunks,
+		currentIndex:  0,
 	}, nil
 }
 
@@ -206,10 +244,9 @@ func (rr *ReconstructedReader) Read(p []byte) (int, error) {
 			}
 
 			chunk := rr.chunks[rr.currentIndex]
-			rc, err := rr.storageManager.GetChunk(rr.ctx, chunk.StorageNodeID, chunk.ProviderObjectID)
+			rc, _, err := rr.reconstructor.RetrieveChunkStream(rr.ctx, chunk)
 			if err != nil {
-				return 0, fmt.Errorf("%w: chunk %d from node %s: %v",
-					ErrMissingChunk, chunk.ChunkIndex, chunk.StorageNodeID, err)
+				return 0, err
 			}
 			rr.currentReader = NewVerifyingReader(rc, chunk.Checksum, chunk)
 		}
@@ -249,11 +286,11 @@ func (r *FileReconstructor) VerifyChunk(ctx context.Context, chunk *ChunkMetadat
 		return false, errors.New("cannot verify nil chunk")
 	}
 
-	rc, err := r.storageManager.GetChunk(ctx, chunk.StorageNodeID, chunk.ProviderObjectID)
+	rc, _, err := r.RetrieveChunkStream(ctx, chunk)
 	if err != nil {
 		chunk.Status = ChunkStatusUnavailable
-		return false, fmt.Errorf("%w: failed to open chunk %d on node %s: %v",
-			ErrMissingChunk, chunk.ChunkIndex, chunk.StorageNodeID, err)
+		return false, fmt.Errorf("%w: failed to open chunk %d: %v",
+			ErrMissingChunk, chunk.ChunkIndex, err)
 	}
 	defer rc.Close()
 

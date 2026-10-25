@@ -116,6 +116,18 @@ CREATE TABLE IF NOT EXISTS chunks (
 CREATE INDEX IF NOT EXISTS idx_chunks_file_id ON chunks(file_id);
 CREATE INDEX IF NOT EXISTS idx_chunks_storage_node_id ON chunks(storage_node_id);
 CREATE INDEX IF NOT EXISTS idx_chunks_status ON chunks(status);
+
+CREATE TABLE IF NOT EXISTS chunk_replicas (
+    id VARCHAR(128) PRIMARY KEY,
+    chunk_id VARCHAR(128) NOT NULL REFERENCES chunks(id) ON DELETE CASCADE,
+    storage_node_id VARCHAR(64) NOT NULL REFERENCES storage_nodes(id) ON DELETE RESTRICT,
+    provider_object_id VARCHAR(255) NOT NULL,
+    status VARCHAR(32) NOT NULL DEFAULT 'STORED',
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_chunk_replicas_chunk_id ON chunk_replicas(chunk_id);
+CREATE INDEX IF NOT EXISTS idx_chunk_replicas_storage_node_id ON chunk_replicas(storage_node_id);
 `
 
 // Migrate runs the initial database schema DDL inside a transaction.

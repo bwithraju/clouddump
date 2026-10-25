@@ -42,15 +42,23 @@ type FileRecord struct {
 	UpdatedAt   time.Time `json:"updated_at" db:"updated_at"`
 }
 
+// ChunkReplicaRecord represents replica metadata for a chunk on a secondary node.
+type ChunkReplicaRecord struct {
+	StorageNodeID    string `json:"storage_node_id"`
+	ProviderObjectID string `json:"provider_object_id"`
+	Status           string `json:"status"`
+}
+
 // ChunkRecord represents a chunk metadata entry persisted in PostgreSQL.
 type ChunkRecord struct {
-	ID               string    `json:"id" db:"id"`
-	FileID           string    `json:"file_id" db:"file_id"`
-	ChunkIndex       int       `json:"chunk_index" db:"chunk_index"`
-	Size             int64     `json:"size" db:"size"`
-	Checksum         string    `json:"checksum" db:"checksum"`
-	StorageNodeID    string    `json:"storage_node_id" db:"storage_node_id"`
-	ProviderObjectID string    `json:"provider_object_id" db:"provider_object_id"`
-	Status           string    `json:"status" db:"status"`
-	CreatedAt        time.Time `json:"created_at" db:"created_at"`
+	ID               string               `json:"id" db:"id"`
+	FileID           string               `json:"file_id" db:"file_id"`
+	ChunkIndex       int                  `json:"chunk_index" db:"chunk_index"`
+	Size             int64                `json:"size" db:"size"`
+	Checksum         string               `json:"checksum" db:"checksum"`
+	StorageNodeID    string               `json:"storage_node_id" db:"storage_node_id"`
+	ProviderObjectID string               `json:"provider_object_id" db:"provider_object_id"`
+	Status           string               `json:"status" db:"status"`
+	Replicas         []ChunkReplicaRecord `json:"replicas,omitempty"`
+	CreatedAt        time.Time            `json:"created_at" db:"created_at"`
 }

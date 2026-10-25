@@ -37,17 +37,48 @@ const (
 	ChunkStatusUnavailable ChunkStatus = "UNAVAILABLE"
 )
 
-// ChunkMetadata represents the internal state and placement of a single chunk.
-type ChunkMetadata struct {
-	ID               string      `json:"id"`
-	FileID           string      `json:"file_id"`
-	ChunkIndex       int         `json:"chunk_index"`
-	Size             int64       `json:"size"`
-	Checksum         string      `json:"checksum"` // SHA-256 hex string
+// ChunkReplica represents a replica location of a chunk on a secondary storage node.
+type ChunkReplica struct {
 	StorageNodeID    string      `json:"storage_node_id"`
 	ProviderObjectID string      `json:"provider_object_id"`
 	Status           ChunkStatus `json:"status"`
-	CreatedAt        time.Time   `json:"created_at"`
+}
+
+// ChunkMetadata represents the internal state and placement of a single chunk.
+type ChunkMetadata struct {
+	ID               string          `json:"id"`
+	FileID           string          `json:"file_id"`
+	ChunkIndex       int             `json:"chunk_index"`
+	Size             int64           `json:"size"`
+	Checksum         string          `json:"checksum"` // SHA-256 hex string
+	StorageNodeID    string          `json:"storage_node_id"`
+	ProviderObjectID string          `json:"provider_object_id"`
+	Status           ChunkStatus     `json:"status"`
+	Replicas         []*ChunkReplica `json:"replicas,omitempty"`
+	CreatedAt        time.Time       `json:"created_at"`
+}
+
+// AddReplica registers a replica location for this chunk.
+func (c *ChunkMetadata) AddReplica(nodeID, objectID string, status ChunkStatus) {
+	c.Replicas = append(c.Replicas, &ChunkReplica{
+		StorageNodeID:    nodeID,
+		ProviderObjectID: objectID,
+		Status:           status,
+	})
+}
+
+// AllStorageNodes returns the list of all storage node IDs hosting this chunk (primary + replicas).
+func (c *ChunkMetadata) AllStorageNodes() []string {
+	nodes := make([]string, 0, 1+len(c.Replicas))
+	if c.StorageNodeID != "" {
+		nodes = append(nodes, c.StorageNodeID)
+	}
+	for _, r := range c.Replicas {
+		if r != nil && r.StorageNodeID != "" {
+			nodes = append(nodes, r.StorageNodeID)
+		}
+	}
+	return nodes
 }
 
 // FileStatus represents the lifecycle state of a logical file.

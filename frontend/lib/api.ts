@@ -21,6 +21,12 @@ export interface FileRecord {
   updated_at: string;
 }
 
+export interface ChunkReplicaRecord {
+  storage_node_id: string;
+  provider_object_id: string;
+  status: string;
+}
+
 export interface ChunkRecord {
   id: string;
   file_id: string;
@@ -30,6 +36,7 @@ export interface ChunkRecord {
   storage_node_id: string;
   provider_object_id: string;
   status: "STORED" | "CORRUPTED" | "MISSING" | string;
+  replicas?: ChunkReplicaRecord[];
   created_at: string;
 }
 
@@ -241,9 +248,10 @@ export async function cancelResumableUpload(uploadId: string): Promise<void> {
   }
 }
 
-// Direct raw streaming upload fallback
+// Direct raw streaming upload with optional replication factor
 export function uploadFile(
   file: File,
+  replicationFactor: number = 1,
   onProgress?: (percent: number, loaded: number, total: number) => void,
   onAbortRef?: { abort?: () => void }
 ): Promise<FileRecord> {
@@ -258,6 +266,9 @@ export function uploadFile(
     xhr.setRequestHeader("X-Filename", file.name);
     xhr.setRequestHeader("X-File-Size", file.size.toString());
     xhr.setRequestHeader("Content-Type", file.type || "application/octet-stream");
+    if (replicationFactor > 1) {
+      xhr.setRequestHeader("X-Replication-Factor", replicationFactor.toString());
+    }
 
     xhr.upload.onprogress = (event) => {
       if (event.lengthComputable && onProgress) {
