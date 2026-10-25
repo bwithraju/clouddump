@@ -181,3 +181,54 @@ func TestLocalStorageProvider_HealthCheck(t *testing.T) {
 		t.Fatalf("expected healthy true and no error, got healthy=%v, err=%v", healthy, err)
 	}
 }
+
+func TestLocalStorageProvider_EdgeCases(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "clouddump_edge_test_*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	p, err := NewLocalStorageProvider(tempDir, 1024*1024)
+	if err != nil {
+		t.Fatalf("failed to initialize provider: %v", err)
+	}
+
+	ctx := context.Background()
+
+	// 1. Reading non-existent chunk returns ErrChunkNotFound
+	_, err = p.GetChunk(ctx, "non_existent_chunk.chunk")
+	if !errors.Is(err, ErrChunkNotFound) {
+		t.Errorf("expected ErrChunkNotFound for non-existent chunk, got: %v", err)
+	}
+
+	// 2. Deleting non-existent chunk succeeds idempotently (returns nil)
+	err = p.DeleteChunk(ctx, "non_existent_chunk.chunk")
+	if err != nil {
+		t.Errorf("expected idempotent nil error for deleting non-existent chunk, got: %v", err)
+	}
+
+	// 3. 1-byte chunk storage and readback
+	singleByte := []byte{0xAA}
+	objID, written, err := p.StoreChunk(ctx, "chunkonebyte", bytes.NewReader(singleByte), 1)
+	if err != nil {
+		t.Fatalf("failed storing 1-byte chunk: %v", err)
+	}
+	if written != 1 {
+		t.Errorf("expected 1 byte written, got %d", written)
+	}
+
+	rc, err := p.GetChunk(ctx, objID)
+	if err != nil {
+		t.Fatalf("failed getting 1-byte chunk: %v", err)
+	}
+	defer rc.Close()
+
+	readData, err := io.ReadAll(rc)
+	if err != nil {
+		t.Fatalf("failed reading 1-byte chunk: %v", err)
+	}
+	if !bytes.Equal(readData, singleByte) {
+		t.Errorf("expected %v, got %v", singleByte, readData)
+	}
+}
