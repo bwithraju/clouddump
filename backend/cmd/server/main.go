@@ -16,6 +16,7 @@ import (
 	"github.com/bwithraju/clouddump/backend/internal/auth"
 	"github.com/bwithraju/clouddump/backend/internal/chunks"
 	"github.com/bwithraju/clouddump/backend/internal/database"
+	"github.com/bwithraju/clouddump/backend/internal/jobs"
 	"github.com/bwithraju/clouddump/backend/internal/providers"
 	"github.com/bwithraju/clouddump/backend/internal/storage"
 	"github.com/bwithraju/clouddump/backend/internal/uploads"
@@ -109,10 +110,39 @@ func main() {
 	oauthService := auth.NewOAuthService(googleOAuthConfig, repo.OAuthTokens())
 	oauthHandler := api.NewOAuthHandler(oauthService, mgr, repo)
 
-	// 6. Construct Handlers and Router
+	// 6. Initialize Redis / Background Job Queue & Workers
+	var jobQueue jobs.JobQueue
+	redisAddr := os.Getenv("REDIS_ADDR")
+	if redisAddr != "" {
+		rq, err := jobs.NewRedisJobQueue(redisAddr, os.Getenv("REDIS_PASSWORD"), 0)
+		if err != nil {
+			log.Printf("[Warning] Failed connecting to Redis at %s (%v). Falling back to in-memory job queue.", redisAddr, err)
+			jobQueue = jobs.NewMemoryJobQueue()
+		} else {
+			log.Printf("Connected to Redis job queue at %s", redisAddr)
+			jobQueue = rq
+		}
+	} else {
+		log.Println("REDIS_ADDR not set; using in-memory background job queue.")
+		jobQueue = jobs.NewMemoryJobQueue()
+	}
+
+	uploadManager := uploads.NewUploadManager(mgr, repo, chunks.DefaultChunkSize)
+	workerPool := jobs.NewJobWorkerPool(jobQueue, 4)
+	jobs.RegisterDefaultHandlers(workerPool, jobs.WorkerDependencies{
+		StorageManager: mgr,
+		UploadManager:  uploadManager,
+		Repo:           repo,
+	})
+	workerPool.Start(context.Background())
+	defer workerPool.Stop()
+	defer jobQueue.Close()
+
+	jobsHandler := api.NewJobsHandler(jobQueue)
+
+	// 7. Construct Handlers and Router
 	fileHandler := api.NewFileHandler(mgr, parallelUploader, fileReconstructor, repo, chunks.DefaultChunkSize)
 	nodesHandler := api.NewNodesHandler(mgr, repo)
-	uploadManager := uploads.NewUploadManager(mgr, repo, chunks.DefaultChunkSize)
 	uploadsHandler := api.NewUploadsHandler(uploadManager)
 
 	routerConfig := api.RouterConfig{
@@ -122,6 +152,7 @@ func main() {
 		AuthHandler:    authHandler,
 		AuthService:    authService,
 		OAuthHandler:   oauthHandler,
+		JobsHandler:    jobsHandler,
 	}
 
 	handler := api.NewRouter(routerConfig)

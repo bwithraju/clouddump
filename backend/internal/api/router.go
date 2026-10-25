@@ -24,6 +24,7 @@ type RouterConfig struct {
 	AuthHandler    *AuthHandler
 	AuthService    *auth.AuthService
 	OAuthHandler   *OAuthHandler
+	JobsHandler    *JobsHandler
 }
 
 // NewRouter sets up and returns the main HTTP handler for the CloudDump API.
@@ -126,6 +127,14 @@ func NewRouter(configs ...RouterConfig) http.Handler {
 			mux.HandleFunc("GET /api/oauth/google/status", wrapAuth(oh.Status))
 			mux.HandleFunc("POST /api/oauth/google/disconnect", wrapAuth(oh.Disconnect))
 			mux.HandleFunc("POST /api/nodes/google-drive", wrapAuth(oh.CreateDriveNode))
+		}
+
+		// Register Background Jobs endpoints if JobsHandler is provided
+		if cfg.JobsHandler != nil {
+			jh := cfg.JobsHandler
+			mux.HandleFunc("GET /api/jobs", wrapAuth(jh.List))
+			mux.HandleFunc("GET /api/jobs/{id}", wrapAuth(jh.Get))
+			mux.HandleFunc("POST /api/jobs/trigger", wrapAuth(jh.Trigger))
 		}
 	}
 
