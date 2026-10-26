@@ -520,3 +520,161 @@ func TestAuth_Logout(t *testing.T) {
 		t.Errorf("expected /api/auth/me 401 Unauthorized after logout, got %d", meRec2.Code)
 	}
 }
+
+// 7. Regression Test: Resumable Upload Session Authentication (Cookie and Bearer Header)
+func TestAuth_UploadSessionAuthenticationRegression(t *testing.T) {
+	env := setupAuthTestEnv(t)
+	defer cleanupAuthTestEnv(env)
+
+	ctx := context.Background()
+
+	// Register user
+	user, session, err := env.authService.Register(ctx, "uploader@example.com", "uploaderpassword123", "Uploader")
+	if err != nil {
+		t.Fatalf("failed registering uploader: %v", err)
+	}
+
+	uploadPayload := `{"filename":"dataset.bin","size":131072,"mime_type":"application/octet-stream","chunk_size":65536}`
+
+	// Case 1: Unauthenticated POST /api/uploads MUST return 401 Unauthorized
+	{
+		req := httptest.NewRequest(http.MethodPost, "/api/uploads", strings.NewReader(uploadPayload))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		env.router.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("expected unauthenticated /api/uploads to return 401 Unauthorized, got %d (body: %s)", rec.Code, rec.Body.String())
+		}
+
+		var errResp map[string]string
+		if err := json.Unmarshal(rec.Body.Bytes(), &errResp); err != nil {
+			t.Fatalf("failed decoding error response: %v", err)
+		}
+		if errResp["error"] != "unauthorized" || errResp["message"] != "authentication required" {
+			t.Errorf("expected unauthorized / authentication required, got: %v", errResp)
+		}
+	}
+
+	// Case 2: POST /api/uploads with invalid Bearer token MUST return 401 Unauthorized
+	{
+		req := httptest.NewRequest(http.MethodPost, "/api/uploads", strings.NewReader(uploadPayload))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", "Bearer invalid-or-expired-token-xyz")
+		rec := httptest.NewRecorder()
+		env.router.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("expected invalid token to return 401 Unauthorized, got %d", rec.Code)
+		}
+	}
+
+	// Case 3: POST /api/uploads with valid session cookie MUST succeed (201 Created)
+	var cookieSessionID string
+	{
+		req := httptest.NewRequest(http.MethodPost, "/api/uploads", strings.NewReader(uploadPayload))
+		req.Header.Set("Content-Type", "application/json")
+		req.AddCookie(&http.Cookie{
+			Name:  auth.SessionCookieName,
+			Value: session.Token,
+		})
+		rec := httptest.NewRecorder()
+		env.router.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusCreated {
+			t.Fatalf("expected cookie-authenticated /api/uploads to return 201 Created, got %d (body: %s)", rec.Code, rec.Body.String())
+		}
+
+		var resp map[string]interface{}
+		if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("failed decoding session summary: %v", err)
+		}
+		cookieSessionID = resp["upload_id"].(string)
+		if cookieSessionID == "" {
+			t.Fatalf("expected non-empty upload_id in response")
+		}
+	}
+
+	// Case 4: POST /api/uploads with valid Authorization: Bearer <token> MUST succeed (201 Created)
+	var bearerSessionID string
+	{
+		req := httptest.NewRequest(http.MethodPost, "/api/uploads", strings.NewReader(uploadPayload))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", "Bearer "+session.Token)
+		rec := httptest.NewRecorder()
+		env.router.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusCreated {
+			t.Fatalf("expected bearer-authenticated /api/uploads to return 201 Created, got %d (body: %s)", rec.Code, rec.Body.String())
+		}
+
+		var resp map[string]interface{}
+		if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("failed decoding session summary: %v", err)
+		}
+		bearerSessionID = resp["upload_id"].(string)
+		if bearerSessionID == "" {
+			t.Fatalf("expected non-empty upload_id in response")
+		}
+	}
+
+	// Case 5: PUT /api/uploads/{id}/chunks/{index} unauthenticated MUST return 401 Unauthorized
+	chunkData := make([]byte, 65536)
+	{
+		req := httptest.NewRequest(http.MethodPut, fmt.Sprintf("/api/uploads/%s/chunks/0", bearerSessionID), bytes.NewReader(chunkData))
+		req.Header.Set("Content-Type", "application/octet-stream")
+		rec := httptest.NewRecorder()
+		env.router.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("expected unauthenticated chunk upload to return 401 Unauthorized, got %d", rec.Code)
+		}
+	}
+
+	// Case 6: PUT /api/uploads/{id}/chunks/{index} with Bearer token MUST succeed (200 OK)
+	{
+		req := httptest.NewRequest(http.MethodPut, fmt.Sprintf("/api/uploads/%s/chunks/0", bearerSessionID), bytes.NewReader(chunkData))
+		req.Header.Set("Content-Type", "application/octet-stream")
+		req.Header.Set("Authorization", "Bearer "+session.Token)
+		rec := httptest.NewRecorder()
+		env.router.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected authenticated chunk upload to return 200 OK, got %d (body: %s)", rec.Code, rec.Body.String())
+		}
+	}
+
+	// Case 7: GET /api/uploads/{id} unauthenticated MUST return 401 Unauthorized
+	{
+		req := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/uploads/%s", bearerSessionID), nil)
+		rec := httptest.NewRecorder()
+		env.router.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("expected unauthenticated get upload session to return 401 Unauthorized, got %d", rec.Code)
+		}
+	}
+
+	// Case 8: GET /api/uploads/{id} with Bearer token MUST return 200 OK with session progress
+	{
+		req := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/uploads/%s", bearerSessionID), nil)
+		req.Header.Set("Authorization", "Bearer "+session.Token)
+		rec := httptest.NewRecorder()
+		env.router.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected authenticated get upload session to return 200 OK, got %d", rec.Code)
+		}
+
+		var summary map[string]interface{}
+		if err := json.Unmarshal(rec.Body.Bytes(), &summary); err != nil {
+			t.Fatalf("failed decoding session summary: %v", err)
+		}
+		if summary["completed_count"].(float64) != 1 {
+			t.Errorf("expected completed_count=1, got %v", summary["completed_count"])
+		}
+	}
+
+	_ = user
+	_ = cookieSessionID
+}

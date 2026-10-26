@@ -138,11 +138,54 @@ export interface DownloadState {
   error?: string;
 }
 
+// Auth Token Storage Management
+const TOKEN_STORAGE_KEY = "clouddump_auth_token";
+let inMemoryToken: string | null = null;
+
+export function getAuthToken(): string | null {
+  if (typeof window !== "undefined") {
+    try {
+      return localStorage.getItem(TOKEN_STORAGE_KEY) || inMemoryToken;
+    } catch {
+      return inMemoryToken;
+    }
+  }
+  return inMemoryToken;
+}
+
+export function setAuthToken(token: string | null): void {
+  inMemoryToken = token;
+  if (typeof window !== "undefined") {
+    try {
+      if (token) {
+        localStorage.setItem(TOKEN_STORAGE_KEY, token);
+      } else {
+        localStorage.removeItem(TOKEN_STORAGE_KEY);
+      }
+    } catch {
+      // Ignore storage errors in restricted contexts
+    }
+  }
+}
+
+export function clearAuthToken(): void {
+  setAuthToken(null);
+}
+
+export function getAuthHeaders(headers: HeadersInit = {}): Headers {
+  const h = new Headers(headers);
+  const token = getAuthToken();
+  if (token && !h.has("Authorization")) {
+    h.set("Authorization", `Bearer ${token}`);
+  }
+  return h;
+}
+
 // Authentication APIs
 export async function register(email: string, password: string, name?: string): Promise<AuthResponse> {
   const res = await fetch(`${API_BASE_URL}/auth/register`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: getAuthHeaders({ "Content-Type": "application/json" }),
     credentials: "include",
     body: JSON.stringify({ email, password, name }),
   });
@@ -150,13 +193,17 @@ export async function register(email: string, password: string, name?: string): 
     const err = await res.text();
     throw new Error(err || `Registration failed: HTTP ${res.status}`);
   }
-  return res.json();
+  const data: AuthResponse = await res.json();
+  if (data.token) {
+    setAuthToken(data.token);
+  }
+  return data;
 }
 
 export async function login(email: string, password: string): Promise<AuthResponse> {
   const res = await fetch(`${API_BASE_URL}/auth/login`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: getAuthHeaders({ "Content-Type": "application/json" }),
     credentials: "include",
     body: JSON.stringify({ email, password }),
   });
@@ -164,30 +211,46 @@ export async function login(email: string, password: string): Promise<AuthRespon
     const err = await res.text();
     throw new Error(err || `Login failed: HTTP ${res.status}`);
   }
-  return res.json();
+  const data: AuthResponse = await res.json();
+  if (data.token) {
+    setAuthToken(data.token);
+  }
+  return data;
 }
 
 export async function logout(): Promise<void> {
-  await fetch(`${API_BASE_URL}/auth/logout`, {
-    method: "POST",
-    credentials: "include",
-  });
+  clearAuthToken();
+  try {
+    await fetch(`${API_BASE_URL}/auth/logout`, {
+      method: "POST",
+      headers: getAuthHeaders(),
+      credentials: "include",
+    });
+  } catch {
+    // Ignore network errors during logout
+  }
 }
 
 export async function fetchCurrentUser(): Promise<User | null> {
-  const res = await fetch(`${API_BASE_URL}/auth/me`, {
-    credentials: "include",
-  });
-  if (!res.ok) {
+  try {
+    const res = await fetch(`${API_BASE_URL}/auth/me`, {
+      headers: getAuthHeaders(),
+      credentials: "include",
+    });
+    if (!res.ok) {
+      return null;
+    }
+    const data = await res.json();
+    return data.user || null;
+  } catch {
     return null;
   }
-  const data = await res.json();
-  return data.user || null;
 }
 
 // Google Drive OAuth & Storage Node APIs
 export async function fetchGoogleAuthURL(): Promise<{ auth_url: string; configured: boolean }> {
   const res = await fetch(`${API_BASE_URL}/oauth/google/auth-url`, {
+    headers: getAuthHeaders(),
     credentials: "include",
   });
   if (!res.ok) {
@@ -199,7 +262,7 @@ export async function fetchGoogleAuthURL(): Promise<{ auth_url: string; configur
 export async function exchangeGoogleOAuthCode(code: string): Promise<any> {
   const res = await fetch(`${API_BASE_URL}/oauth/google/callback`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: getAuthHeaders({ "Content-Type": "application/json" }),
     credentials: "include",
     body: JSON.stringify({ code }),
   });
@@ -212,6 +275,7 @@ export async function exchangeGoogleOAuthCode(code: string): Promise<any> {
 
 export async function fetchGoogleOAuthStatus(): Promise<{ connected: boolean; expires_at?: string }> {
   const res = await fetch(`${API_BASE_URL}/oauth/google/status`, {
+    headers: getAuthHeaders(),
     credentials: "include",
   });
   if (!res.ok) {
@@ -223,6 +287,7 @@ export async function fetchGoogleOAuthStatus(): Promise<{ connected: boolean; ex
 export async function disconnectGoogleDrive(): Promise<void> {
   await fetch(`${API_BASE_URL}/oauth/google/disconnect`, {
     method: "POST",
+    headers: getAuthHeaders(),
     credentials: "include",
   });
 }
@@ -230,7 +295,7 @@ export async function disconnectGoogleDrive(): Promise<void> {
 export async function createGoogleDriveNode(name?: string, folderId?: string): Promise<NodeStats> {
   const res = await fetch(`${API_BASE_URL}/nodes/google-drive`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: getAuthHeaders({ "Content-Type": "application/json" }),
     credentials: "include",
     body: JSON.stringify({ name, folder_id: folderId }),
   });
@@ -244,6 +309,7 @@ export async function createGoogleDriveNode(name?: string, folderId?: string): P
 // Health Check
 export async function fetchHealth(): Promise<HealthCheckResponse> {
   const res = await fetch(`${API_BASE_URL}/health`, {
+    headers: getAuthHeaders(),
     credentials: "include",
   });
   if (!res.ok) {
@@ -255,6 +321,7 @@ export async function fetchHealth(): Promise<HealthCheckResponse> {
 // Storage Pool & Nodes
 export async function fetchPoolStats(): Promise<PoolStats> {
   const res = await fetch(`${API_BASE_URL}/nodes/stats`, {
+    headers: getAuthHeaders(),
     credentials: "include",
   });
   if (!res.ok) {
@@ -265,6 +332,7 @@ export async function fetchPoolStats(): Promise<PoolStats> {
 
 export async function fetchNodes(): Promise<NodeStats[]> {
   const res = await fetch(`${API_BASE_URL}/nodes`, {
+    headers: getAuthHeaders(),
     credentials: "include",
   });
   if (!res.ok) {
@@ -284,7 +352,7 @@ export async function simulateNodeFailure(
 }> {
   const res = await fetch(`${API_BASE_URL}/nodes/${encodeURIComponent(nodeId)}/simulate-failure`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: getAuthHeaders({ "Content-Type": "application/json" }),
     credentials: "include",
     body: JSON.stringify({ offline }),
   });
@@ -303,6 +371,7 @@ export async function triggerReconcile(): Promise<{
 }> {
   const res = await fetch(`${API_BASE_URL}/nodes/reconcile`, {
     method: "POST",
+    headers: getAuthHeaders(),
     credentials: "include",
   });
   if (!res.ok) {
@@ -315,6 +384,7 @@ export async function triggerReconcile(): Promise<{
 // Files
 export async function fetchFiles(): Promise<FileRecord[]> {
   const res = await fetch(`${API_BASE_URL}/files`, {
+    headers: getAuthHeaders(),
     credentials: "include",
   });
   if (!res.ok) {
@@ -325,6 +395,7 @@ export async function fetchFiles(): Promise<FileRecord[]> {
 
 export async function fetchFileDetails(id: string): Promise<FileDetailsResponse> {
   const res = await fetch(`${API_BASE_URL}/files/${encodeURIComponent(id)}`, {
+    headers: getAuthHeaders(),
     credentials: "include",
   });
   if (!res.ok) {
@@ -336,6 +407,7 @@ export async function fetchFileDetails(id: string): Promise<FileDetailsResponse>
 export async function deleteFile(id: string): Promise<void> {
   const res = await fetch(`${API_BASE_URL}/files/${encodeURIComponent(id)}`, {
     method: "DELETE",
+    headers: getAuthHeaders(),
     credentials: "include",
   });
   if (!res.ok) {
@@ -344,13 +416,10 @@ export async function deleteFile(id: string): Promise<void> {
 }
 
 export function downloadFile(id: string, filename: string): void {
-  const downloadUrl = `${API_BASE_URL}/files/${encodeURIComponent(id)}/download`;
-  const link = document.createElement("a");
-  link.href = downloadUrl;
-  link.setAttribute("download", filename);
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
+  // Use downloadFileWithProgress to ensure Authorization header is supplied
+  downloadFileWithProgress(id, filename).catch((err) => {
+    alert(`Download failed: ${err.message || err}`);
+  });
 }
 
 export async function downloadFileWithProgress(
@@ -359,7 +428,10 @@ export async function downloadFileWithProgress(
   onProgress?: (loaded: number, total: number, percent: number) => void
 ): Promise<void> {
   const downloadUrl = `${API_BASE_URL}/files/${encodeURIComponent(id)}/download`;
-  const res = await fetch(downloadUrl, { credentials: "include" });
+  const res = await fetch(downloadUrl, {
+    headers: getAuthHeaders(),
+    credentials: "include",
+  });
   if (!res.ok) {
     const errText = await res.text();
     throw new Error(`Download failed (${res.status}): ${errText}`);
@@ -371,8 +443,7 @@ export async function downloadFileWithProgress(
 
   const reader = res.body?.getReader();
   if (!reader) {
-    downloadFile(id, filename);
-    return;
+    throw new Error("Unable to read download response stream");
   }
 
   const chunks: BlobPart[] = [];
@@ -402,6 +473,7 @@ export async function downloadFileWithProgress(
 // System Telemetry & Monitoring APIs
 export async function fetchSystemActivity(): Promise<SystemActivityResponse> {
   const res = await fetch(`${API_BASE_URL}/system/activity`, {
+    headers: getAuthHeaders(),
     credentials: "include",
   });
   if (!res.ok) {
@@ -412,6 +484,7 @@ export async function fetchSystemActivity(): Promise<SystemActivityResponse> {
 
 export async function fetchUploadSessions(): Promise<SessionSummary[]> {
   const res = await fetch(`${API_BASE_URL}/uploads`, {
+    headers: getAuthHeaders(),
     credentials: "include",
   });
   if (!res.ok) {
@@ -429,7 +502,7 @@ export async function initResumableUpload(
 ): Promise<SessionSummary> {
   const res = await fetch(`${API_BASE_URL}/uploads`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: getAuthHeaders({ "Content-Type": "application/json" }),
     credentials: "include",
     body: JSON.stringify({
       filename,
@@ -447,6 +520,7 @@ export async function initResumableUpload(
 
 export async function fetchUploadSession(uploadId: string): Promise<SessionSummary> {
   const res = await fetch(`${API_BASE_URL}/uploads/${encodeURIComponent(uploadId)}`, {
+    headers: getAuthHeaders(),
     credentials: "include",
   });
   if (!res.ok) {
@@ -460,14 +534,16 @@ export async function uploadChunk(
   chunkIndex: number,
   chunkBlob: Blob
 ): Promise<any> {
+  const headers = getAuthHeaders({
+    "Content-Type": "application/octet-stream",
+    "Content-Length": chunkBlob.size.toString(),
+  });
+
   const res = await fetch(
     `${API_BASE_URL}/uploads/${encodeURIComponent(uploadId)}/chunks/${chunkIndex}`,
     {
       method: "PUT",
-      headers: {
-        "Content-Type": "application/octet-stream",
-        "Content-Length": chunkBlob.size.toString(),
-      },
+      headers,
       credentials: "include",
       body: chunkBlob,
     }
@@ -482,6 +558,7 @@ export async function uploadChunk(
 export async function cancelResumableUpload(uploadId: string): Promise<void> {
   const res = await fetch(`${API_BASE_URL}/uploads/${encodeURIComponent(uploadId)}/cancel`, {
     method: "POST",
+    headers: getAuthHeaders(),
     credentials: "include",
   });
   if (!res.ok) {
@@ -505,6 +582,12 @@ export function uploadFile(
 
     xhr.open("POST", `${API_BASE_URL}/files/upload`, true);
     xhr.withCredentials = true;
+
+    const token = getAuthToken();
+    if (token) {
+      xhr.setRequestHeader("Authorization", `Bearer ${token}`);
+    }
+
     xhr.setRequestHeader("X-Filename", file.name);
     xhr.setRequestHeader("X-File-Size", file.size.toString());
     xhr.setRequestHeader("Content-Type", file.type || "application/octet-stream");

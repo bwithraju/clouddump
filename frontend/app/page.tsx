@@ -23,7 +23,7 @@ import { useFiles } from "@/hooks/use-files";
 import { useSystemActivity, useUploadSessions } from "@/hooks/use-system";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Button, getButtonClassName } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { formatBytes, formatDate } from "@/lib/utils";
@@ -125,17 +125,19 @@ export default function DashboardPage() {
             <RefreshCw className="h-3.5 w-3.5" />
             Refresh
           </Button>
-          <Link href="/upload">
-            <Button className="flex items-center gap-2">
-              <UploadCloud className="h-4 w-4" />
-              Upload File
-            </Button>
+          <Link
+            href="/upload"
+            className={getButtonClassName("default", "default", "flex items-center gap-2")}
+          >
+            <UploadCloud className="h-4 w-4" />
+            Upload File
           </Link>
-          <Link href="/files">
-            <Button variant="outline" className="flex items-center gap-2">
-              <FileText className="h-4 w-4" />
-              Files
-            </Button>
+          <Link
+            href="/files"
+            className={getButtonClassName("outline", "default", "flex items-center gap-2")}
+          >
+            <FileText className="h-4 w-4" />
+            Files
           </Link>
         </div>
       </div>
@@ -273,10 +275,11 @@ export default function DashboardPage() {
                 <CardDescription className="text-xs text-indigo-300/70">Real-time chunk streaming & distribution</CardDescription>
               </div>
             </div>
-            <Link href="/upload">
-              <Button variant="ghost" size="sm" className="text-xs text-indigo-300 hover:text-white">
-                Upload Center →
-              </Button>
+            <Link
+              href="/upload"
+              className={getButtonClassName("ghost", "sm", "text-xs text-indigo-300 hover:text-white")}
+            >
+              Upload Center →
             </Link>
           </CardHeader>
           <CardContent className="space-y-3">
@@ -340,10 +343,11 @@ export default function DashboardPage() {
               <CardTitle className="text-base font-semibold text-white">Storage Node Health & Allocation</CardTitle>
               <CardDescription className="text-xs">Capacity distribution and live node states</CardDescription>
             </div>
-            <Link href="/nodes">
-              <Button variant="ghost" size="sm" className="text-xs flex items-center gap-1 text-indigo-400">
-                Manage Nodes <ArrowRight className="h-3 w-3" />
-              </Button>
+            <Link
+              href="/nodes"
+              className={getButtonClassName("ghost", "sm", "text-xs flex items-center gap-1 text-indigo-400")}
+            >
+              Manage Nodes <ArrowRight className="h-3 w-3" />
             </Link>
           </CardHeader>
           <CardContent>
@@ -475,10 +479,11 @@ export default function DashboardPage() {
             <CardTitle className="text-base font-semibold text-white">Recent Files</CardTitle>
             <CardDescription className="text-xs">Latest uploaded files across the pool</CardDescription>
           </div>
-          <Link href="/files">
-            <Button variant="ghost" size="sm" className="text-xs flex items-center gap-1 text-indigo-400">
-              View all files <ArrowRight className="h-3 w-3" />
-            </Button>
+          <Link
+            href="/files"
+            className={getButtonClassName("ghost", "sm", "text-xs flex items-center gap-1 text-indigo-400")}
+          >
+            View all files <ArrowRight className="h-3 w-3" />
           </Link>
         </CardHeader>
         <CardContent>
@@ -491,8 +496,11 @@ export default function DashboardPage() {
               <p className="text-xs text-slate-500 max-w-sm mx-auto">
                 Upload your first file to distribute chunks across the storage node pool.
               </p>
-              <Link href="/upload">
-                <Button size="sm" className="mt-2">Upload Now</Button>
+              <Link
+                href="/upload"
+                className={getButtonClassName("default", "sm", "mt-2")}
+              >
+                Upload Now
               </Link>
             </div>
           ) : (
@@ -548,8 +556,11 @@ export default function DashboardPage() {
                           <Download className="h-3.5 w-3.5 text-slate-300" />
                         )}
                       </Button>
-                      <Link href={`/files/${file.id}`}>
-                        <Button variant="ghost" size="sm">Details</Button>
+                      <Link
+                        href={`/files/${file.id}`}
+                        className={getButtonClassName("ghost", "sm")}
+                      >
+                        Details
                       </Link>
                     </TableCell>
                   </TableRow>

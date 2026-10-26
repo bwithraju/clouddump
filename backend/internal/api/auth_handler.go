@@ -12,10 +12,13 @@ import (
 
 // isSecureRequest determines whether cookies should have the Secure attribute.
 func isSecureRequest(r *http.Request) bool {
-	if os.Getenv("ENVIRONMENT") == "production" || os.Getenv("COOKIE_SECURE") == "true" {
+	if os.Getenv("COOKIE_SECURE") == "true" {
 		return true
 	}
 	if r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https" {
+		return true
+	}
+	if os.Getenv("ENVIRONMENT") == "production" && r.Header.Get("X-Forwarded-Proto") == "https" {
 		return true
 	}
 	return false

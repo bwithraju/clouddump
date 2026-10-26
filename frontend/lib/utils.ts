@@ -18,13 +18,18 @@ export function formatDate(dateStr: string): string {
   if (!dateStr) return "-";
   try {
     const d = new Date(dateStr);
-    return d.toLocaleString("en-US", {
-      month: "short",
-      day: "numeric",
-      year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    });
+    if (isNaN(d.getTime())) return dateStr;
+    return (
+      d.toLocaleString("en-US", {
+        timeZone: "UTC",
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: true,
+      }) + " UTC"
+    );
   } catch {
     return dateStr;
   }

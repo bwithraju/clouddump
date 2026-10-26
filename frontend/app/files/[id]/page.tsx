@@ -7,7 +7,7 @@ import { ArrowLeft, Download, Trash2, FileText, CheckCircle2, ShieldCheck, HardD
 import { useFileDetails, useDeleteFile } from "@/hooks/use-files";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Button, getButtonClassName } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { formatBytes, formatDate } from "@/lib/utils";
 import { downloadFile } from "@/lib/api";
@@ -55,8 +55,11 @@ export default function FileDetailsPage() {
         <AlertCircle className="mx-auto h-10 w-10 text-rose-500" />
         <h2 className="text-lg font-semibold text-white">File Not Found</h2>
         <p className="text-sm text-slate-400">The requested file could not be found or has been deleted.</p>
-        <Link href="/files">
-          <Button variant="outline" size="sm">Back to File Manager</Button>
+        <Link
+          href="/files"
+          className={getButtonClassName("outline", "sm")}
+        >
+          Back to File Manager
         </Link>
       </div>
     );
@@ -67,10 +70,11 @@ export default function FileDetailsPage() {
       {/* Top Breadcrumb & Actions */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-2 border-b border-slate-800">
         <div className="flex items-center gap-3">
-          <Link href="/files">
-            <Button variant="ghost" size="sm" className="h-9 px-2 text-slate-400 hover:text-white">
-              <ArrowLeft className="h-4 w-4" />
-            </Button>
+          <Link
+            href="/files"
+            className={getButtonClassName("ghost", "sm", "h-9 px-2 text-slate-400 hover:text-white")}
+          >
+            <ArrowLeft className="h-4 w-4" />
           </Link>
           <div>
             <div className="flex items-center gap-2">

@@ -14,6 +14,7 @@ import {
   RotateCcw,
   Layers,
   ShieldCheck,
+  LogIn,
 } from "lucide-react";
 import {
   initResumableUpload,
@@ -24,8 +25,10 @@ import {
   uploadFile,
 } from "@/lib/api";
 import { useQueryClient } from "@tanstack/react-query";
+import { useAuth } from "@/hooks/use-auth";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
+import { Button, getButtonClassName } from "@/components/ui/button";
+import { AuthModal } from "@/components/auth-modal";
 import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
 import { formatBytes } from "@/lib/utils";
@@ -34,6 +37,8 @@ const CHUNK_SIZE = 2 * 1024 * 1024; // 2 MB chunks for responsive resumable uplo
 
 export default function UploadPage() {
   const queryClient = useQueryClient();
+  const { isAuthenticated, isLoading: authLoading } = useAuth();
+  const [authModalOpen, setAuthModalOpen] = React.useState(false);
 
   const [dragActive, setDragActive] = React.useState(false);
   const [selectedFile, setSelectedFile] = React.useState<File | null>(null);
@@ -146,6 +151,12 @@ export default function UploadPage() {
     setErrorMsg(null);
     setCompletedFileId(null);
 
+    if (!isAuthenticated) {
+      setErrorMsg("Authentication required: Please sign in or create an account to start an upload session.");
+      setAuthModalOpen(true);
+      return;
+    }
+
     try {
       // 1. Initialize or query existing session
       let activeSession = session;
@@ -166,7 +177,13 @@ export default function UploadPage() {
       // 2. Start upload loop
       await startUploadLoop(activeSession);
     } catch (err: any) {
-      setErrorMsg(err.message || "Failed to initialize upload session");
+      const msg = err.message || "Failed to initialize upload session";
+      if (msg.includes("401") || msg.toLowerCase().includes("unauthorized") || msg.toLowerCase().includes("authentication required")) {
+        setErrorMsg("Authentication required: Your session may have expired. Please sign in.");
+        setAuthModalOpen(true);
+      } else {
+        setErrorMsg(msg);
+      }
     }
   };
 
@@ -235,6 +252,27 @@ export default function UploadPage() {
         </p>
       </div>
 
+      {/* Authentication Banner when unauthenticated */}
+      {!isAuthenticated && !authLoading && (
+        <div className="rounded-lg border border-indigo-900/60 bg-indigo-950/30 p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+          <div className="flex items-center gap-2.5 text-indigo-200">
+            <ShieldCheck className="h-5 w-5 text-indigo-400 shrink-0" />
+            <div>
+              <span className="font-semibold block sm:inline">Authentication Required: </span>
+              <span>Sign in to initialize resumable upload sessions and distribute chunks across storage nodes.</span>
+            </div>
+          </div>
+          <Button
+            size="sm"
+            onClick={() => setAuthModalOpen(true)}
+            className="h-8 px-3 text-xs bg-indigo-600 hover:bg-indigo-500 shrink-0 self-start sm:self-auto flex items-center gap-1.5"
+          >
+            <LogIn className="h-3.5 w-3.5" />
+            Log In / Register
+          </Button>
+        </div>
+      )}
+
       <Card className="border-slate-800">
         <CardContent className="pt-6 space-y-6">
           {/* Success State */}
@@ -256,13 +294,17 @@ export default function UploadPage() {
                 <Button variant="outline" onClick={handleReset}>
                   Upload Another File
                 </Button>
-                <Link href={`/files/${completedFileId}`}>
-                  <Button className="flex items-center gap-1.5">
-                    View File Chunks <ArrowRight className="h-4 w-4" />
-                  </Button>
+                <Link
+                  href={`/files/${completedFileId}`}
+                  className={getButtonClassName("default", "default", "flex items-center gap-1.5")}
+                >
+                  View File Chunks <ArrowRight className="h-4 w-4" />
                 </Link>
-                <Link href="/files">
-                  <Button variant="secondary">Go to File Manager</Button>
+                <Link
+                  href="/files"
+                  className={getButtonClassName("secondary", "default")}
+                >
+                  Go to File Manager
                 </Link>
               </div>
             </div>
@@ -304,9 +346,9 @@ export default function UploadPage() {
                     Resumable session uploads support any file size. Interruptions can be retried without re-uploading stored chunks.
                   </p>
 
-                  <Button variant="secondary" size="sm" className="mt-4 pointer-events-none">
+                  <div className="mt-4 inline-flex items-center justify-center rounded-md bg-slate-800 text-slate-200 border border-slate-700 h-8 px-3 text-xs pointer-events-none">
                     Select File
-                  </Button>
+                  </div>
                 </div>
               )}
 
@@ -449,6 +491,11 @@ export default function UploadPage() {
           )}
         </CardContent>
       </Card>
+      <AuthModal
+        isOpen={authModalOpen}
+        onClose={() => setAuthModalOpen(false)}
+        defaultMode="login"
+      />
     </div>
   );
 }

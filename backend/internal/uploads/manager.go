@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/bwithraju/clouddump/backend/internal/chunks"
@@ -27,7 +28,10 @@ var (
 	ErrChunkSizeMismatch = errors.New("chunk size does not match expected byte length")
 )
 
-var nonAlphaNumRegex = regexp.MustCompile(`[^a-zA-Z0-9_]`)
+var (
+	sessionCounter uint64
+	nonAlphaNumRegex = regexp.MustCompile(`[^a-zA-Z0-9_]`)
+)
 
 func sanitizeID(input string) string {
 	cleaned := nonAlphaNumRegex.ReplaceAllString(input, "_")
@@ -102,8 +106,9 @@ func (m *UploadManager) CreateSession(
 	}
 
 	now := time.Now().UTC()
-	uploadID := fmt.Sprintf("upload_%d_%s", now.UnixNano(), sanitizeID(filename))
-	fileID := fmt.Sprintf("file_%d_%s", now.UnixNano(), sanitizeID(filename))
+	counter := atomic.AddUint64(&sessionCounter, 1)
+	uploadID := fmt.Sprintf("upload_%d_%d_%s", now.UnixNano(), counter, sanitizeID(filename))
+	fileID := fmt.Sprintf("file_%d_%d_%s", now.UnixNano(), counter, sanitizeID(filename))
 
 	// Create initial file record in database
 	fileRecord := &database.FileRecord{

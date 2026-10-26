@@ -6,7 +6,7 @@ import { Files, Download, Trash2, Eye, UploadCloud, Search, AlertCircle, Refresh
 import { useFiles, useDeleteFile } from "@/hooks/use-files";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Button, getButtonClassName } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { formatBytes, formatDate } from "@/lib/utils";
 import { downloadFile } from "@/lib/api";
@@ -60,11 +60,12 @@ export default function FileManagerPage() {
             <RefreshCw className="h-3.5 w-3.5" />
             Refresh
           </Button>
-          <Link href="/upload">
-            <Button size="sm" className="flex items-center gap-2">
-              <UploadCloud className="h-4 w-4" />
-              Upload File
-            </Button>
+          <Link
+            href="/upload"
+            className={getButtonClassName("default", "sm", "flex items-center gap-2")}
+          >
+            <UploadCloud className="h-4 w-4" />
+            Upload File
           </Link>
         </div>
       </div>
@@ -117,8 +118,11 @@ export default function FileManagerPage() {
                   : "Upload a file to experience streaming chunk distribution."}
               </p>
               {!searchQuery && (
-                <Link href="/upload">
-                  <Button size="sm" className="mt-2">Upload First File</Button>
+                <Link
+                  href="/upload"
+                  className={getButtonClassName("default", "sm", "mt-2")}
+                >
+                  Upload First File
                 </Link>
               )}
             </div>
@@ -178,11 +182,12 @@ export default function FileManagerPage() {
                     <TableCell className="text-right">
                       <div className="flex items-center justify-end gap-1.5">
                         {/* Details */}
-                        <Link href={`/files/${file.id}`}>
-                          <Button variant="ghost" size="sm" className="h-8 px-2 text-xs flex items-center gap-1">
-                            <Eye className="h-3.5 w-3.5 text-indigo-400" />
-                            Details
-                          </Button>
+                        <Link
+                          href={`/files/${file.id}`}
+                          className={getButtonClassName("ghost", "sm", "h-8 px-2 text-xs flex items-center gap-1")}
+                        >
+                          <Eye className="h-3.5 w-3.5 text-indigo-400" />
+                          Details
                         </Link>
 
                         {/* Download */}
