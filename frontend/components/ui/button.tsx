@@ -2,7 +2,7 @@ import * as React from "react";
 import { cn } from "@/lib/utils";
 
 export interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
-  variant?: "default" | "secondary" | "destructive" | "outline" | "ghost";
+  variant?: "default" | "primary" | "secondary" | "destructive" | "outline" | "ghost";
   size?: "default" | "sm" | "lg" | "icon";
 }
 
@@ -12,22 +12,23 @@ export function getButtonClassName(
   className = ""
 ) {
   const variantStyles = {
-    default: "bg-indigo-600 text-white hover:bg-indigo-500 shadow-sm",
-    secondary: "bg-slate-800 text-slate-200 hover:bg-slate-700 border border-slate-700",
-    destructive: "bg-rose-600 text-white hover:bg-rose-500 shadow-sm",
-    outline: "border border-slate-700 bg-transparent text-slate-200 hover:bg-slate-800",
-    ghost: "text-slate-300 hover:bg-slate-800 hover:text-white",
+    default: "bg-slate-900 text-white hover:bg-slate-800 shadow-xs border border-slate-900",
+    primary: "bg-indigo-600 text-white hover:bg-indigo-700 shadow-xs border border-indigo-600",
+    secondary: "bg-gray-100 text-slate-800 hover:bg-gray-200 border border-transparent",
+    destructive: "bg-rose-600 text-white hover:bg-rose-700 shadow-xs border border-rose-600",
+    outline: "border border-gray-200 bg-white text-slate-700 hover:bg-gray-50 hover:text-slate-900 shadow-xs",
+    ghost: "text-slate-600 hover:bg-gray-100 hover:text-slate-900 border border-transparent",
   }[variant];
 
   const sizeStyles = {
     default: "h-9 px-4 py-2 text-sm",
-    sm: "h-8 rounded-md px-3 text-xs",
-    lg: "h-10 rounded-md px-8 text-base",
+    sm: "h-8 rounded-lg px-3 text-xs",
+    lg: "h-10 rounded-lg px-6 text-sm",
     icon: "h-9 w-9",
   }[size];
 
   return cn(
-    "inline-flex items-center justify-center rounded-lg font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-indigo-400 disabled:pointer-events-none disabled:opacity-50 cursor-pointer",
+    "inline-flex items-center justify-center rounded-lg font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/20 disabled:pointer-events-none disabled:opacity-50 cursor-pointer select-none",
     variantStyles,
     sizeStyles,
     className

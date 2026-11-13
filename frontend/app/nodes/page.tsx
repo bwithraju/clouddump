@@ -2,7 +2,21 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { Server, HardDrive, CheckCircle2, AlertTriangle, RefreshCw, PowerOff, Power, ShieldAlert, Cloud, PlusCircle, FolderOpen, AlertCircle } from "lucide-react";
+import {
+  Server,
+  HardDrive,
+  CheckCircle2,
+  AlertTriangle,
+  RefreshCw,
+  PowerOff,
+  Power,
+  ShieldAlert,
+  Cloud,
+  PlusCircle,
+  FolderOpen,
+  AlertCircle,
+  Radio,
+} from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { usePoolStats, useNodes } from "@/hooks/use-nodes";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -143,35 +157,40 @@ export default function StorageNodesPage() {
 
   const totalCap = stats?.total_capacity || 0;
   const usedCap = stats?.used_capacity || 0;
-  const freeCap = stats?.available_capacity || (totalCap - usedCap);
-  const usedPct = totalCap > 0 ? Math.round((usedCap / totalCap) * 100) : 0;
+  const freeCap = stats?.available_capacity || Math.max(0, totalCap - usedCap);
+  const usedPct = totalCap > 0 ? Math.min(100, Math.round((usedCap / totalCap) * 100)) : 0;
   const offlineNodes = stats?.offline_nodes || 0;
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-7">
       {/* Page Header */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-2 border-b border-slate-800">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight text-white flex items-center gap-2">
-            <Server className="h-6 w-6 text-indigo-400" />
-            Storage Nodes & Fault Management
+          <h1 className="text-2xl font-bold tracking-tight text-slate-900 flex items-center gap-2.5">
+            <Server className="h-6 w-6 text-indigo-600" />
+            Nodes &amp; Storage
           </h1>
-          <p className="text-sm text-slate-400 mt-1">
-            Monitor node health, capacity distribution, and simulate outage scenarios for fault tolerance.
+          <p className="text-xs text-gray-500 mt-0.5">
+            Monitor node health, capacity allocation, simulate outages, and manage Google Drive cloud providers.
           </p>
         </div>
-        <div className="flex items-center gap-2 self-start">
+        <div className="flex items-center gap-2">
           <Button
             variant="outline"
             size="sm"
             onClick={handleReconcile}
             disabled={reconciling}
-            className="flex items-center gap-1.5 text-xs text-indigo-300 border-indigo-900/60 hover:bg-indigo-950/40"
+            className="text-xs flex items-center gap-1.5 text-indigo-700 border-indigo-200 bg-indigo-50/50 hover:bg-indigo-50"
           >
-            <ShieldAlert className="h-3.5 w-3.5" />
+            <ShieldAlert className="h-3.5 w-3.5 text-indigo-600" />
             {reconciling ? "Probing Health..." : "Probe Health & Reconcile"}
           </Button>
-          <Button variant="outline" size="sm" onClick={handleRefresh} className="flex items-center gap-1.5">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleRefresh}
+            className="text-xs flex items-center gap-1.5 text-gray-600 hover:text-slate-900"
+          >
             <RefreshCw className="h-3.5 w-3.5" />
             Refresh
           </Button>
@@ -180,94 +199,33 @@ export default function StorageNodesPage() {
 
       {/* Offline Alert Banner */}
       {offlineNodes > 0 && (
-        <div className="rounded-lg border border-amber-900/70 bg-amber-950/30 p-4 flex items-start gap-3 text-amber-200">
-          <AlertTriangle className="h-5 w-5 text-amber-400 shrink-0 mt-0.5" />
+        <div className="rounded-xl border border-amber-200 bg-amber-50/80 p-4 flex items-start gap-3 text-amber-900 shadow-xs text-xs">
+          <AlertTriangle className="h-5 w-5 text-amber-600 shrink-0 mt-0.5" />
           <div className="space-y-1">
-            <div className="text-sm font-semibold">
+            <div className="font-semibold text-sm">
               {offlineNodes} storage {offlineNodes === 1 ? "node is" : "nodes are"} currently OFFLINE
             </div>
-            <p className="text-xs text-amber-300/80">
-              Affected file chunks are currently unreachable. Files requiring chunks from offline nodes are marked <span className="font-mono font-semibold">DEGRADED</span> to prevent data corruption. New uploads will automatically bypass offline nodes.
+            <p className="text-amber-800/90">
+              Affected chunks are temporarily unreachable. Files with missing primary chunks are marked <span className="font-mono font-semibold">DEGRADED</span> to prevent corrupt file streams. New uploads automatically divert to online nodes.
             </p>
           </div>
         </div>
       )}
 
-      {/* Aggregate Pool Overview */}
-      <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
-        <Card>
-          <CardHeader className="pb-2">
-            <CardDescription className="text-xs uppercase tracking-wider font-mono">Total Capacity</CardDescription>
-            <CardTitle className="text-xl font-bold text-white">{formatBytes(totalCap)}</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-xs text-slate-400">All registered targets</div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="pb-2">
-            <CardDescription className="text-xs uppercase tracking-wider font-mono">Used Capacity</CardDescription>
-            <CardTitle className="text-xl font-bold text-indigo-400">{formatBytes(usedCap)}</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-xs text-slate-400">{usedPct}% of pool reserved</div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="pb-2">
-            <CardDescription className="text-xs uppercase tracking-wider font-mono">Available Capacity</CardDescription>
-            <CardTitle className="text-xl font-bold text-emerald-400">{formatBytes(freeCap)}</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-xs text-slate-400">Ready for incoming chunks</div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="pb-2">
-            <CardDescription className="text-xs uppercase tracking-wider font-mono">Online Nodes</CardDescription>
-            <CardTitle className="text-xl font-bold text-emerald-400 flex items-center gap-1.5">
-              <CheckCircle2 className="h-5 w-5 text-emerald-500" />
-              {stats?.online_nodes || 0} / {stats?.node_count || 0}
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-xs text-slate-400">Operational targets</div>
-          </CardContent>
-        </Card>
-
-        <Card className={offlineNodes > 0 ? "border-amber-900/60 bg-amber-950/20" : ""}>
-          <CardHeader className="pb-2">
-            <CardDescription className="text-xs uppercase tracking-wider font-mono">Offline Nodes</CardDescription>
-            <CardTitle className={`text-xl font-bold flex items-center gap-1.5 ${offlineNodes > 0 ? "text-amber-400" : "text-slate-400"}`}>
-              <AlertTriangle className={`h-5 w-5 ${offlineNodes > 0 ? "text-amber-500" : "text-slate-500"}`} />
-              {offlineNodes}
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-xs text-slate-400">
-              {offlineNodes > 0 ? "Outage simulated/active" : "Zero failed nodes"}
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-
       {/* OAuth Callback Notification Banner */}
       {oauthBanner && (
         <div
-          className={`rounded-lg p-4 text-xs flex items-center justify-between gap-3 ${
+          className={`rounded-xl p-4 text-xs flex items-center justify-between gap-3 shadow-xs ${
             oauthBanner.type === "success"
-              ? "border border-emerald-800 bg-emerald-950/40 text-emerald-200"
-              : "border border-rose-800 bg-rose-950/40 text-rose-200"
+              ? "border border-emerald-200 bg-emerald-50 text-emerald-900"
+              : "border border-rose-200 bg-rose-50 text-rose-900"
           }`}
         >
           <div className="flex items-center gap-2.5">
             {oauthBanner.type === "success" ? (
-              <CheckCircle2 className="h-5 w-5 text-emerald-400 shrink-0" />
+              <CheckCircle2 className="h-5 w-5 text-emerald-600 shrink-0" />
             ) : (
-              <AlertCircle className="h-5 w-5 text-rose-400 shrink-0" />
+              <AlertCircle className="h-5 w-5 text-rose-600 shrink-0" />
             )}
             <span>{oauthBanner.message}</span>
           </div>
@@ -275,73 +233,121 @@ export default function StorageNodesPage() {
             variant="ghost"
             size="sm"
             onClick={() => setOauthBanner(null)}
-            className="h-6 px-2 text-xs text-slate-400 hover:text-white"
+            className="h-6 px-2 text-xs text-gray-500 hover:text-slate-900"
           >
             Dismiss
           </Button>
         </div>
       )}
 
-      {/* Cloud Storage Provider Integration */}
-      <Card className="border-indigo-900/50 bg-slate-900/40">
-        <CardHeader className="pb-3">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Cloud className="h-5 w-5 text-indigo-400" />
-              <CardTitle className="text-base font-semibold">Google Drive Storage Provider</CardTitle>
-            </div>
-            <Badge variant={gdriveConnected ? "success" : "outline"}>
-              {gdriveConnected ? "OAuth Linked (Active)" : "Not Connected"}
-            </Badge>
+      {/* Aggregate Pool Overview Cards */}
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+        <div className="rounded-xl border border-gray-200/80 bg-white p-4 shadow-xs space-y-1">
+          <div className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider">Total Capacity</div>
+          <div className="text-xl font-bold text-slate-900">{formatBytes(totalCap)}</div>
+          <div className="text-xs text-gray-400">All registered targets</div>
+        </div>
+
+        <div className="rounded-xl border border-gray-200/80 bg-white p-4 shadow-xs space-y-1">
+          <div className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider">Used Capacity</div>
+          <div className="text-xl font-bold text-indigo-600">{formatBytes(usedCap)}</div>
+          <div className="text-xs text-gray-400">{usedPct}% of pool reserved</div>
+        </div>
+
+        <div className="rounded-xl border border-gray-200/80 bg-white p-4 shadow-xs space-y-1">
+          <div className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider">Available Capacity</div>
+          <div className="text-xl font-bold text-emerald-600">{formatBytes(freeCap)}</div>
+          <div className="text-xs text-gray-400">Ready for incoming chunks</div>
+        </div>
+
+        <div className="rounded-xl border border-gray-200/80 bg-white p-4 shadow-xs space-y-1">
+          <div className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider">Online Nodes</div>
+          <div className="text-xl font-bold text-emerald-600 flex items-center gap-1.5">
+            <CheckCircle2 className="h-5 w-5 text-emerald-500" />
+            {stats?.online_nodes || 0} / {stats?.node_count || 0}
           </div>
-          <CardDescription className="text-xs">
-            Connect Google Drive via OAuth 2.0 as an independent StorageProvider in your logical storage pool.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="flex flex-wrap items-center gap-3">
-            {!gdriveConnected ? (
+          <div className="text-xs text-gray-400">Operational targets</div>
+        </div>
+
+        <div className={`rounded-xl border p-4 shadow-xs space-y-1 ${
+          offlineNodes > 0
+            ? "border-amber-200 bg-amber-50/50"
+            : "border-gray-200/80 bg-white"
+        }`}>
+          <div className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider">Offline Nodes</div>
+          <div className={`text-xl font-bold flex items-center gap-1.5 ${
+            offlineNodes > 0 ? "text-amber-600" : "text-gray-400"
+          }`}>
+            <AlertTriangle className={`h-5 w-5 ${offlineNodes > 0 ? "text-amber-500" : "text-gray-300"}`} />
+            {offlineNodes}
+          </div>
+          <div className="text-xs text-gray-400">
+            {offlineNodes > 0 ? "Failover active" : "Zero failed nodes"}
+          </div>
+        </div>
+      </div>
+
+      {/* Cloud Storage Provider Integration (Google Drive) */}
+      <div className="rounded-xl border border-gray-200/80 bg-white p-5 shadow-xs space-y-3">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2.5">
+            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-blue-50 text-blue-600">
+              <Cloud className="h-5 w-5" />
+            </div>
+            <div>
+              <h3 className="text-sm font-semibold text-slate-900">Google Drive Storage Provider</h3>
+              <p className="text-xs text-gray-500">
+                Connect Google Drive via OAuth 2.0 to browse remote files or add Google Drive as a heterogeneous storage node.
+              </p>
+            </div>
+          </div>
+          <Badge variant={gdriveConnected ? "success" : "outline"}>
+            {gdriveConnected ? "OAuth Linked (Active)" : "Not Connected"}
+          </Badge>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2.5 pt-1">
+          {!gdriveConnected ? (
+            <Button
+              size="sm"
+              onClick={handleConnectGDrive}
+              disabled={connecting}
+              className="bg-slate-900 hover:bg-slate-800 text-white text-xs shadow-xs"
+            >
+              {connecting ? "Opening OAuth..." : "Connect Google Drive via OAuth"}
+            </Button>
+          ) : (
+            <>
               <Button
                 size="sm"
-                onClick={handleConnectGDrive}
-                disabled={connecting}
-                className="bg-indigo-600 hover:bg-indigo-500 text-xs"
+                onClick={() => setBrowserModalOpen(true)}
+                className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs flex items-center gap-1.5 shadow-xs"
               >
-                {connecting ? "Opening OAuth..." : "Connect Google Drive via OAuth"}
+                <FolderOpen className="h-3.5 w-3.5" />
+                Browse &amp; Import Files from Drive
               </Button>
-            ) : (
-              <>
-                <Button
-                  size="sm"
-                  onClick={() => setBrowserModalOpen(true)}
-                  className="bg-indigo-600 hover:bg-indigo-500 text-xs flex items-center gap-1.5"
-                >
-                  <FolderOpen className="h-3.5 w-3.5" />
-                  Browse &amp; Import Files from Drive
-                </Button>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={handleCreateDriveNode}
-                  disabled={creatingNode}
-                  className="text-xs border-indigo-800 text-indigo-300 hover:bg-indigo-950/40 flex items-center gap-1.5"
-                >
-                  <PlusCircle className="h-3.5 w-3.5" />
-                  {creatingNode ? "Adding Node..." : "Add Drive Node to Pool"}
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={handleDisconnectGDrive}
-                  className="text-xs border-rose-900/60 text-rose-300 hover:bg-rose-950/30"
-                >
-                  Disconnect Google Drive
-                </Button>
-              </>
-            )}
-          </div>
-        </CardContent>
-      </Card>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={handleCreateDriveNode}
+                disabled={creatingNode}
+                className="text-xs flex items-center gap-1.5 shadow-xs"
+              >
+                <PlusCircle className="h-3.5 w-3.5 text-indigo-600" />
+                {creatingNode ? "Adding Node..." : "Add Drive Node to Pool"}
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleDisconnectGDrive}
+                className="text-xs text-rose-600 hover:bg-rose-50 hover:text-rose-700 border-gray-200"
+              >
+                Disconnect Google Drive
+              </Button>
+            </>
+          )}
+        </div>
+      </div>
 
       <GDriveBrowserModal
         isOpen={browserModalOpen}
@@ -349,99 +355,86 @@ export default function StorageNodesPage() {
       />
 
       {/* Node Cards Grid */}
-      <div>
-        <h2 className="text-lg font-semibold text-white mb-4">Node Allocation Status & Fault Simulation</h2>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="space-y-3">
+        <h2 className="text-base font-bold text-slate-900">Node Allocation Status</h2>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           {(nodes || []).map((node) => {
             const usagePercent =
               node.total_capacity > 0
-                ? Math.round((node.used_capacity / node.total_capacity) * 100)
+                ? Math.min(100, Math.round((node.used_capacity / node.total_capacity) * 100))
                 : 0;
             const isOnline = node.status === "ONLINE";
             const isToggling = togglingNodeId === node.id;
 
             return (
-              <Card key={node.id} className={isOnline ? "border-slate-800" : "border-rose-900/60 bg-rose-950/10"}>
-                <CardHeader className="pb-3">
+              <div
+                key={node.id}
+                className="rounded-xl border border-gray-200/80 bg-white p-4 shadow-xs space-y-3 flex flex-col justify-between"
+              >
+                <div className="space-y-2">
                   <div className="flex items-center justify-between">
-                    <span className="text-xs font-mono text-indigo-400 uppercase tracking-wider">
-                      {node.id}
-                    </span>
+                    <span className="font-semibold text-sm text-slate-900 truncate pr-2">{node.name}</span>
                     <Badge variant={isOnline ? "success" : node.status === "DEGRADED" ? "warning" : "destructive"}>
                       {node.status}
                     </Badge>
                   </div>
-                  <CardTitle className="text-base font-semibold mt-1">{node.name}</CardTitle>
-                  <CardDescription className="text-xs">
-                    Provider: <span className="font-mono text-slate-300">{node.provider_type || "local"}</span>
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-3">
-                  <div>
-                    <div className="flex justify-between text-xs mb-1">
-                      <span className="text-slate-400">Used</span>
-                      <span className="text-white font-mono font-medium">{usagePercent}%</span>
-                    </div>
-                    <Progress value={usagePercent} className="h-2" />
+
+                  <div className="text-[11px] text-gray-400 font-mono">
+                    Provider: {node.provider_type || "local"} · {node.id}
                   </div>
 
-                  <div className="rounded-lg bg-slate-950/70 border border-slate-800/80 p-2.5 text-xs space-y-1 font-mono">
-                    <div className="flex justify-between">
-                      <span className="text-slate-500">Total:</span>
-                      <span className="text-slate-300">{formatBytes(node.total_capacity)}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-slate-500">Used:</span>
-                      <span className="text-indigo-400">{formatBytes(node.used_capacity)}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-slate-500">Free:</span>
-                      <span className="text-emerald-400">{formatBytes(node.available_capacity)}</span>
-                    </div>
+                  <Progress value={usagePercent} className="h-2" />
+
+                  <div className="flex justify-between text-xs text-gray-500">
+                    <span>{formatBytes(node.used_capacity)} used</span>
+                    <span className="font-semibold text-slate-700">{usagePercent}%</span>
                   </div>
 
-                  {/* Fault Simulation Toggle */}
+                  <div className="flex justify-between text-[11px] text-gray-400 pt-0.5 border-t border-gray-100">
+                    <span>Total: {formatBytes(node.total_capacity)}</span>
+                    <span className="text-emerald-600 font-medium">Free: {formatBytes(node.available_capacity)}</span>
+                  </div>
+                </div>
+
+                <div className="pt-2">
                   <Button
                     variant={isOnline ? "destructive" : "outline"}
                     size="sm"
                     disabled={isToggling}
                     onClick={() => handleToggleFailure(node.id, node.status)}
-                    className="w-full text-xs flex items-center justify-center gap-1.5 mt-2"
+                    className="w-full h-8 text-xs flex items-center justify-center gap-1.5"
                   >
                     {isOnline ? (
                       <>
                         <PowerOff className="h-3.5 w-3.5" />
-                        {isToggling ? "Taking Offline..." : "Simulate Outage"}
+                        Simulate Offline
                       </>
                     ) : (
                       <>
-                        <Power className="h-3.5 w-3.5 text-emerald-400" />
-                        {isToggling ? "Restoring..." : "Restore Online"}
+                        <Power className="h-3.5 w-3.5 text-emerald-600" />
+                        Restore Online
                       </>
                     )}
                   </Button>
-                </CardContent>
-              </Card>
+                </div>
+              </div>
             );
           })}
         </div>
       </div>
 
-      {/* Detailed Node Table */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base font-semibold">Registered Nodes Detail</CardTitle>
-          <CardDescription className="text-xs">
-            Complete telemetry from the StorageManager allocation registry with live simulation controls
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
+      {/* Node Fault Simulation Table */}
+      <div className="space-y-3">
+        <h2 className="text-base font-bold text-slate-900">Node Diagnostics Table</h2>
+        <div className="rounded-xl border border-gray-200/80 bg-white shadow-xs overflow-hidden">
           {nodesLoading ? (
-            <div className="py-8 text-center text-sm text-slate-400">Loading node metrics...</div>
+            <div className="p-8 text-center text-xs text-gray-400">Loading nodes...</div>
+          ) : !nodes || nodes.length === 0 ? (
+            <div className="p-8 text-center text-xs text-gray-400">No storage nodes registered.</div>
           ) : (
             <Table>
               <TableHeader>
-                <TableRow>
+                <TableRow className="border-b border-gray-100 bg-gray-50/50">
                   <TableHead>Node ID</TableHead>
                   <TableHead>Name</TableHead>
                   <TableHead>Provider</TableHead>
@@ -449,31 +442,31 @@ export default function StorageNodesPage() {
                   <TableHead>Used</TableHead>
                   <TableHead>Available</TableHead>
                   <TableHead>Status</TableHead>
-                  <TableHead>Last Check</TableHead>
+                  <TableHead>Last Heartbeat</TableHead>
                   <TableHead className="text-right">Failure Simulation</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {(nodes || []).map((node) => {
+                {nodes.map((node) => {
                   const isOnline = node.status === "ONLINE";
                   const isToggling = togglingNodeId === node.id;
 
                   return (
-                    <TableRow key={node.id}>
-                      <TableCell className="font-mono text-xs font-semibold text-indigo-300">
+                    <TableRow key={node.id} className="hover:bg-gray-50/60 transition-colors">
+                      <TableCell className="font-mono text-xs font-semibold text-indigo-600">
                         {node.id}
                       </TableCell>
-                      <TableCell className="font-medium text-white">{node.name}</TableCell>
-                      <TableCell className="font-mono text-xs text-slate-400">{node.provider_type || "local"}</TableCell>
-                      <TableCell className="font-mono text-sm">{formatBytes(node.total_capacity)}</TableCell>
-                      <TableCell className="font-mono text-sm text-indigo-400">{formatBytes(node.used_capacity)}</TableCell>
-                      <TableCell className="font-mono text-sm text-emerald-400">{formatBytes(node.available_capacity)}</TableCell>
+                      <TableCell className="font-medium text-slate-900 text-sm">{node.name}</TableCell>
+                      <TableCell className="font-mono text-xs text-gray-500">{node.provider_type || "local"}</TableCell>
+                      <TableCell className="font-mono text-xs text-slate-700">{formatBytes(node.total_capacity)}</TableCell>
+                      <TableCell className="font-mono text-xs text-indigo-600">{formatBytes(node.used_capacity)}</TableCell>
+                      <TableCell className="font-mono text-xs text-emerald-600">{formatBytes(node.available_capacity)}</TableCell>
                       <TableCell>
                         <Badge variant={isOnline ? "success" : node.status === "DEGRADED" ? "warning" : "destructive"}>
                           {node.status}
                         </Badge>
                       </TableCell>
-                      <TableCell className="text-xs text-slate-400">
+                      <TableCell className="text-xs text-gray-400">
                         {node.last_health_check ? formatDate(node.last_health_check) : "Live"}
                       </TableCell>
                       <TableCell className="text-right">
@@ -491,7 +484,7 @@ export default function StorageNodesPage() {
                             </>
                           ) : (
                             <>
-                              <Power className="h-3 w-3 text-emerald-400" />
+                              <Power className="h-3 w-3 text-emerald-600" />
                               Restore Online
                             </>
                           )}
@@ -503,8 +496,8 @@ export default function StorageNodesPage() {
               </TableBody>
             </Table>
           )}
-        </CardContent>
-      </Card>
+        </div>
+      </div>
     </div>
   );
 }

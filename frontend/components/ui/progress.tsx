@@ -18,11 +18,11 @@ export function Progress({
 
   return (
     <div
-      className={cn("relative h-2 w-full overflow-hidden rounded-full bg-slate-800", className)}
+      className={cn("relative h-2 w-full overflow-hidden rounded-full bg-gray-100", className)}
       {...props}
     >
       <div
-        className={cn("h-full w-full flex-1 bg-indigo-500 transition-all duration-300", indicatorClassName)}
+        className={cn("h-full w-full flex-1 bg-indigo-600 transition-all duration-300 rounded-full", indicatorClassName)}
         style={{ transform: `translateX(-${100 - percentage}%)` }}
       />
     </div>

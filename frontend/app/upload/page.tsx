@@ -25,7 +25,6 @@ import {
   uploadChunk,
   cancelResumableUpload,
   SessionSummary,
-  uploadFile,
   deleteFile,
   downloadFile,
 } from "@/lib/api";
@@ -38,7 +37,7 @@ import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
 import { formatBytes } from "@/lib/utils";
 
-const CHUNK_SIZE = 2 * 1024 * 1024; // 2 MB chunks for responsive resumable uploads
+const CHUNK_SIZE = 2 * 1024 * 1024; // 2 MB chunks
 
 export default function UploadPage() {
   const queryClient = useQueryClient();
@@ -104,45 +103,38 @@ export default function UploadPage() {
 
     let latestSession = currentSession;
     const totalChunks = latestSession.total_chunks;
-
-    // Check which chunks are already completed
     const completedSet = new Set(latestSession.completed_indices || []);
 
     try {
       for (let i = 0; i < totalChunks; i++) {
-        // If user paused, break loop safely
         if (pausedRef.current || cancelledRef.current) {
           break;
         }
 
-        // If chunk is already completed, skip it (Idempotent!)
         if (completedSet.has(i)) {
           continue;
         }
 
         setCurrentChunkIndex(i);
 
-        // Slice chunk from file
         const start = i * latestSession.chunk_size;
         const end = Math.min(start + latestSession.chunk_size, selectedFile.size);
         const chunkBlob = selectedFile.slice(start, end);
 
-        // Upload chunk
         await uploadChunk(latestSession.upload_id, i, chunkBlob);
         completedSet.add(i);
 
-        // Fetch fresh session progress
         latestSession = await fetchUploadSession(latestSession.upload_id);
         setSession(latestSession);
       }
 
       if (!pausedRef.current && !cancelledRef.current) {
-        // Finished all chunks!
         setIsUploading(false);
         setCompletedFileId(latestSession.file_id);
         queryClient.invalidateQueries({ queryKey: ["files"] });
         queryClient.invalidateQueries({ queryKey: ["nodes-stats"] });
         queryClient.invalidateQueries({ queryKey: ["nodes"] });
+        queryClient.invalidateQueries({ queryKey: ["system/activity"] });
       }
     } catch (err: any) {
       if (!cancelledRef.current) {
@@ -152,7 +144,6 @@ export default function UploadPage() {
     }
   };
 
-  // Initial trigger
   const handleStartUpload = async () => {
     if (!selectedFile) return;
 
@@ -167,7 +158,6 @@ export default function UploadPage() {
     }
 
     try {
-      // 1. Initialize or query existing session
       let activeSession = session;
       if (!activeSession || activeSession.status === "COMPLETED" || activeSession.status === "CANCELLED") {
         activeSession = await initResumableUpload(
@@ -178,12 +168,10 @@ export default function UploadPage() {
         );
         setSession(activeSession);
       } else {
-        // Refresh session
         activeSession = await fetchUploadSession(activeSession.upload_id);
         setSession(activeSession);
       }
 
-      // 2. Start upload loop
       await startUploadLoop(activeSession);
     } catch (err: any) {
       const msg = err.message || "Failed to initialize upload session";
@@ -300,21 +288,21 @@ export default function UploadPage() {
   return (
     <div className="max-w-3xl mx-auto space-y-6">
       {/* Title */}
-      <div className="border-b border-slate-800 pb-4">
-        <h1 className="text-2xl font-bold tracking-tight text-white flex items-center gap-2">
-          <UploadCloud className="h-6 w-6 text-indigo-400" />
-          Resumable File Upload
+      <div>
+        <h1 className="text-2xl font-bold tracking-tight text-slate-900 flex items-center gap-2.5">
+          <UploadCloud className="h-6 w-6 text-indigo-600" />
+          Upload file
         </h1>
-        <p className="text-sm text-slate-400 mt-1">
-          Files are sliced into resilient chunks, tracked by active upload sessions, and can be paused or resumed across network drops without duplicate storage.
+        <p className="text-xs text-gray-500 mt-0.5">
+          Files are sliced into resilient chunks and streamed directly into heterogeneous storage nodes with resumable failover support.
         </p>
       </div>
 
       {/* Authentication Banner when unauthenticated */}
       {!isAuthenticated && !authLoading && (
-        <div className="rounded-lg border border-indigo-900/60 bg-indigo-950/30 p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
-          <div className="flex items-center gap-2.5 text-indigo-200">
-            <ShieldCheck className="h-5 w-5 text-indigo-400 shrink-0" />
+        <div className="rounded-xl border border-indigo-100 bg-indigo-50/70 p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs shadow-xs">
+          <div className="flex items-center gap-2.5 text-indigo-950">
+            <ShieldCheck className="h-5 w-5 text-indigo-600 shrink-0" />
             <div>
               <span className="font-semibold block sm:inline">Authentication Required: </span>
               <span>Sign in to initialize resumable upload sessions and distribute chunks across storage nodes.</span>
@@ -323,7 +311,7 @@ export default function UploadPage() {
           <Button
             size="sm"
             onClick={() => setAuthModalOpen(true)}
-            className="h-8 px-3 text-xs bg-indigo-600 hover:bg-indigo-500 shrink-0 self-start sm:self-auto flex items-center gap-1.5"
+            className="h-8 px-3 text-xs bg-slate-900 hover:bg-slate-800 text-white shrink-0 self-start sm:self-auto flex items-center gap-1.5 shadow-xs"
           >
             <LogIn className="h-3.5 w-3.5" />
             Log In / Register
@@ -331,20 +319,20 @@ export default function UploadPage() {
         </div>
       )}
 
-      {/* Feedback Banner (e.g. after file is deleted) */}
+      {/* Feedback Banner */}
       {actionFeedback && !completedFileId && (
         <div
-          className={`rounded-lg p-3 text-xs flex items-center justify-between gap-2 ${
+          className={`rounded-xl p-3.5 text-xs flex items-center justify-between gap-2 shadow-xs ${
             actionFeedback.type === "success"
-              ? "border border-emerald-800 bg-emerald-950/40 text-emerald-300"
-              : "border border-rose-800 bg-rose-950/40 text-rose-300"
+              ? "border border-emerald-200 bg-emerald-50 text-emerald-900"
+              : "border border-rose-200 bg-rose-50 text-rose-900"
           }`}
         >
           <div className="flex items-center gap-2">
             {actionFeedback.type === "success" ? (
-              <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-400" />
+              <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600" />
             ) : (
-              <AlertCircle className="h-4 w-4 shrink-0 text-rose-400" />
+              <AlertCircle className="h-4 w-4 shrink-0 text-rose-600" />
             )}
             <span>{actionFeedback.message}</span>
           </div>
@@ -352,271 +340,268 @@ export default function UploadPage() {
             variant="ghost"
             size="sm"
             onClick={() => setActionFeedback(null)}
-            className="h-6 px-1.5 text-xs text-slate-400 hover:text-white"
+            className="h-6 px-1.5 text-xs text-gray-500 hover:text-slate-900"
           >
             Dismiss
           </Button>
         </div>
       )}
 
-      <Card className="border-slate-800">
-        <CardContent className="pt-6 space-y-6">
-          {/* Success State */}
-          {completedFileId ? (
-            <div className="text-center py-8 space-y-4">
-              <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-emerald-950/80 border border-emerald-800 text-emerald-400">
-                <CheckCircle2 className="h-8 w-8" />
-              </div>
-              <div>
-                <h3 className="text-lg font-semibold text-white">Upload Completed & Verified!</h3>
-                <p className="text-sm text-slate-400 mt-1">
-                  File <span className="text-white font-medium">{session?.filename || selectedFile?.name}</span> (
-                  {formatBytes(session?.total_size || selectedFile?.size || 0)}) was successfully chunked into{" "}
-                  {totalChunks} chunks and distributed across nodes.
-                </p>
-              </div>
-
-              {actionFeedback && (
-                <div
-                  className={`mx-auto max-w-md rounded-lg p-3 text-xs flex items-center justify-center gap-2 ${
-                    actionFeedback.type === "success"
-                      ? "border border-emerald-800 bg-emerald-950/40 text-emerald-300"
-                      : "border border-rose-800 bg-rose-950/40 text-rose-300"
-                  }`}
-                >
-                  {actionFeedback.type === "success" ? (
-                    <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-400" />
-                  ) : (
-                    <AlertCircle className="h-4 w-4 shrink-0 text-rose-400" />
-                  )}
-                  <span>{actionFeedback.message}</span>
-                </div>
-              )}
-
-              <div className="pt-4 flex flex-wrap items-center justify-center gap-3">
-                <Button variant="outline" onClick={handleReset} className="flex items-center gap-1.5">
-                  <RotateCcw className="h-3.5 w-3.5" />
-                  Upload Another File
-                </Button>
-                <Button
-                  variant="secondary"
-                  onClick={handleDownloadCompleted}
-                  className="flex items-center gap-1.5 text-slate-200 hover:text-white"
-                >
-                  <Download className="h-3.5 w-3.5 text-emerald-400" />
-                  Download
-                </Button>
-                <Link
-                  href={`/files/${completedFileId}`}
-                  className={getButtonClassName("default", "default", "flex items-center gap-1.5")}
-                >
-                  View File Chunks <ArrowRight className="h-4 w-4" />
-                </Link>
-                <Link
-                  href="/files"
-                  className={getButtonClassName("secondary", "default")}
-                >
-                  Go to File Manager
-                </Link>
-                <Button
-                  variant="destructive"
-                  onClick={handleDeleteCompleted}
-                  disabled={isDeleting}
-                  className="flex items-center gap-1.5 bg-rose-600 hover:bg-rose-500 text-white"
-                  title="Delete file and permanently remove all chunks"
-                >
-                  {isDeleting ? (
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  ) : (
-                    <Trash2 className="h-3.5 w-3.5" />
-                  )}
-                  {isDeleting ? "Deleting..." : "Delete File"}
-                </Button>
-              </div>
+      <div className="rounded-xl border border-gray-200/80 bg-white p-6 shadow-xs space-y-6">
+        {/* Success State */}
+        {completedFileId ? (
+          <div className="text-center py-8 space-y-4">
+            <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-600">
+              <CheckCircle2 className="h-8 w-8" />
             </div>
-          ) : (
-            <>
-              {/* Dropzone */}
-              {!selectedFile && (
-                <div
-                  onDragEnter={handleDrag}
-                  onDragOver={handleDrag}
-                  onDragLeave={handleDrag}
-                  onDrop={handleDrop}
-                  onClick={() => fileInputRef.current?.click()}
-                  className={`relative flex flex-col items-center justify-center rounded-xl border-2 border-dashed p-10 text-center transition-colors cursor-pointer ${
-                    dragActive
-                      ? "border-indigo-500 bg-indigo-950/20"
-                      : "border-slate-800 bg-slate-950/50 hover:border-slate-700 hover:bg-slate-900/50"
-                  }`}
-                >
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    className="hidden"
-                    onChange={(e) => {
-                      if (e.target.files && e.target.files[0]) {
-                        handleSelectFile(e.target.files[0]);
-                      }
-                    }}
-                  />
+            <div>
+              <h3 className="text-lg font-bold text-slate-900">Upload Completed & Verified!</h3>
+              <p className="text-xs text-gray-500 mt-1 max-w-md mx-auto">
+                File <span className="text-slate-900 font-semibold">{session?.filename || selectedFile?.name}</span> (
+                {formatBytes(session?.total_size || selectedFile?.size || 0)}) was successfully chunked into{" "}
+                {totalChunks} chunks and distributed across storage nodes.
+              </p>
+            </div>
 
-                  <div className="flex h-12 w-12 items-center justify-center rounded-full bg-slate-900 text-indigo-400 border border-slate-800 mb-4">
-                    <UploadCloud className="h-6 w-6" />
-                  </div>
+            {actionFeedback && (
+              <div
+                className={`mx-auto max-w-md rounded-xl p-3 text-xs flex items-center justify-center gap-2 shadow-xs ${
+                  actionFeedback.type === "success"
+                    ? "border border-emerald-200 bg-emerald-50 text-emerald-900"
+                    : "border border-rose-200 bg-rose-50 text-rose-900"
+                }`}
+              >
+                <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600" />
+                <span>{actionFeedback.message}</span>
+              </div>
+            )}
 
-                  <div className="text-sm font-medium text-white mb-1">
-                    Choose a file or drag & drop it here
-                  </div>
-                  <p className="text-xs text-slate-500 max-w-sm">
-                    Resumable session uploads support any file size. Interruptions can be retried without re-uploading stored chunks.
-                  </p>
+            <div className="pt-4 flex flex-wrap items-center justify-center gap-2.5">
+              <Button variant="outline" onClick={handleReset} className="flex items-center gap-1.5 text-xs">
+                <RotateCcw className="h-3.5 w-3.5" />
+                Upload Another File
+              </Button>
+              <Button
+                variant="outline"
+                onClick={handleDownloadCompleted}
+                className="flex items-center gap-1.5 text-xs"
+              >
+                <Download className="h-3.5 w-3.5 text-indigo-600" />
+                Download
+              </Button>
+              <Link
+                href={`/files/${completedFileId}`}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-slate-900 px-4 py-2 text-xs font-semibold text-white shadow-xs hover:bg-slate-800 transition-colors"
+              >
+                View File Chunks <ArrowRight className="h-4 w-4" />
+              </Link>
+              <Link
+                href="/files"
+                className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-4 py-2 text-xs font-semibold text-slate-700 shadow-xs hover:bg-gray-50 transition-colors"
+              >
+                Go to File Manager
+              </Link>
+              <Button
+                variant="destructive"
+                onClick={handleDeleteCompleted}
+                disabled={isDeleting}
+                className="flex items-center gap-1.5 text-xs shadow-xs"
+                title="Delete file and permanently remove all chunks"
+              >
+                {isDeleting ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Trash2 className="h-3.5 w-3.5" />
+                )}
+                {isDeleting ? "Deleting..." : "Delete File"}
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <>
+            {/* Dropzone */}
+            {!selectedFile && (
+              <div
+                onDragEnter={handleDrag}
+                onDragOver={handleDrag}
+                onDragLeave={handleDrag}
+                onDrop={handleDrop}
+                onClick={() => fileInputRef.current?.click()}
+                className={`relative flex flex-col items-center justify-center rounded-2xl border-2 border-dashed p-12 text-center transition-all cursor-pointer ${
+                  dragActive
+                    ? "border-indigo-500 bg-indigo-50/50 scale-[0.99]"
+                    : "border-gray-200 bg-gray-50/50 hover:border-indigo-400 hover:bg-indigo-50/20"
+                }`}
+              >
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  className="hidden"
+                  onChange={(e) => {
+                    if (e.target.files && e.target.files[0]) {
+                      handleSelectFile(e.target.files[0]);
+                    }
+                  }}
+                />
 
-                  <div className="mt-4 inline-flex items-center justify-center rounded-md bg-slate-800 text-slate-200 border border-slate-700 h-8 px-3 text-xs pointer-events-none">
-                    Select File
-                  </div>
+                <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-white text-indigo-600 border border-gray-200 shadow-xs mb-3">
+                  <UploadCloud className="h-6 w-6" />
                 </div>
-              )}
 
-              {/* Selected File Card */}
-              {selectedFile && !isUploading && !isPaused && (
-                <div className="flex items-center justify-between rounded-lg border border-slate-800 bg-slate-900/60 p-4">
-                  <div className="flex items-center gap-3">
-                    <FileText className="h-8 w-8 text-indigo-400" />
-                    <div>
-                      <div className="text-sm font-semibold text-white">{selectedFile.name}</div>
-                      <div className="text-xs text-slate-400">
-                        {formatBytes(selectedFile.size)} · {selectedFile.type || "application/octet-stream"}
-                      </div>
+                <div className="text-sm font-semibold text-slate-900 mb-1">
+                  Choose a file or drag & drop it here
+                </div>
+                <p className="text-xs text-gray-500 max-w-sm">
+                  Resumable session uploads slice files into resilient 2 MB chunks. Interruptions can be retried without re-uploading stored chunks.
+                </p>
+
+                <div className="mt-4 inline-flex items-center justify-center rounded-lg bg-white text-slate-800 border border-gray-200 shadow-xs h-8 px-3 text-xs font-medium pointer-events-none">
+                  Select File
+                </div>
+              </div>
+            )}
+
+            {/* Selected File Card */}
+            {selectedFile && !isUploading && !isPaused && (
+              <div className="flex items-center justify-between rounded-xl border border-gray-200 bg-gray-50/60 p-4">
+                <div className="flex items-center gap-3">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-white border border-gray-200 shadow-xs text-indigo-600">
+                    <FileText className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <div className="text-sm font-semibold text-slate-900">{selectedFile.name}</div>
+                    <div className="text-xs text-gray-500">
+                      {formatBytes(selectedFile.size)} · {selectedFile.type || "application/octet-stream"}
                     </div>
                   </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Button variant="ghost" size="sm" onClick={handleReset} className="text-xs">
+                    Change
+                  </Button>
+                  <Button size="sm" onClick={handleStartUpload} className="flex items-center gap-1.5 text-xs bg-slate-900 text-white hover:bg-slate-800">
+                    <UploadCloud className="h-4 w-4" />
+                    Start Resumable Upload
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            {/* Live Upload Progress */}
+            {(isUploading || isPaused) && (
+              <div className="rounded-xl border border-gray-200 bg-gray-50/50 p-5 space-y-4">
+                <div className="flex items-center justify-between text-sm">
                   <div className="flex items-center gap-2">
-                    <Button variant="ghost" size="sm" onClick={handleReset}>
-                      Change
-                    </Button>
-                    <Button size="sm" onClick={handleStartUpload} className="flex items-center gap-1.5">
-                      <UploadCloud className="h-4 w-4" />
-                      Start Resumable Upload
-                    </Button>
+                    {isPaused ? (
+                      <Badge variant="warning" className="flex items-center gap-1">
+                        <Pause className="h-3 w-3" /> Paused
+                      </Badge>
+                    ) : (
+                      <div className="flex items-center gap-2">
+                        <UploadCloud className="h-4 w-4 text-indigo-600 animate-pulse" />
+                        <span className="font-semibold text-slate-900 text-xs">
+                          Uploading Chunk {currentChunkIndex !== null ? currentChunkIndex + 1 : 1} of {totalChunks}...
+                        </span>
+                      </div>
+                    )}
                   </div>
+                  <span className="font-mono text-indigo-600 font-bold text-xs">{progressPercent}%</span>
                 </div>
-              )}
 
-              {/* Live Upload Progress */}
-              {(isUploading || isPaused) && (
-                <div className="rounded-lg border border-slate-800 bg-slate-900/60 p-5 space-y-4">
-                  <div className="flex items-center justify-between text-sm">
-                    <div className="flex items-center gap-2">
-                      {isPaused ? (
-                        <Badge variant="warning" className="flex items-center gap-1">
-                          <Pause className="h-3 w-3" /> Paused
-                        </Badge>
-                      ) : (
-                        <div className="flex items-center gap-2">
-                          <UploadCloud className="h-4 w-4 text-indigo-400 animate-pulse" />
-                          <span className="font-medium text-white">
-                            Uploading Chunk {currentChunkIndex !== null ? currentChunkIndex + 1 : 1} of {totalChunks}...
-                          </span>
-                        </div>
-                      )}
-                    </div>
-                    <span className="font-mono text-indigo-400 font-semibold">{progressPercent}%</span>
-                  </div>
+                <Progress value={progressPercent} className="h-2.5" />
 
-                  <Progress value={progressPercent} className="h-2.5" />
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-gray-500">
+                  <span>
+                    {completedCount} of {totalChunks} chunks completed (
+                    {formatBytes(completedCount * CHUNK_SIZE)} of {formatBytes(selectedFile?.size || 0)})
+                  </span>
 
-                  <div className="flex items-center justify-between text-xs text-slate-400">
-                    <span>
-                      {completedCount} of {totalChunks} chunks completed (
-                      {formatBytes(completedCount * CHUNK_SIZE)} of {formatBytes(selectedFile?.size || 0)})
-                    </span>
-
-                    <div className="flex items-center gap-2">
-                      {isUploading ? (
-                        <Button
-                          variant="secondary"
-                          size="sm"
-                          onClick={handlePause}
-                          className="h-7 px-3 text-xs flex items-center gap-1"
-                        >
-                          <Pause className="h-3 w-3" /> Pause
-                        </Button>
-                      ) : (
-                        <Button
-                          size="sm"
-                          onClick={handleResume}
-                          className="h-7 px-3 text-xs flex items-center gap-1 bg-indigo-600 hover:bg-indigo-500"
-                        >
-                          <Play className="h-3 w-3" /> Resume
-                        </Button>
-                      )}
-
+                  <div className="flex items-center gap-2">
+                    {isUploading ? (
                       <Button
-                        variant="destructive"
+                        variant="secondary"
                         size="sm"
-                        onClick={handleCancel}
+                        onClick={handlePause}
                         className="h-7 px-3 text-xs flex items-center gap-1"
                       >
-                        <XCircle className="h-3 w-3" /> Cancel
+                        <Pause className="h-3 w-3" /> Pause
                       </Button>
-                    </div>
-                  </div>
+                    ) : (
+                      <Button
+                        size="sm"
+                        onClick={handleResume}
+                        className="h-7 px-3 text-xs flex items-center gap-1 bg-indigo-600 hover:bg-indigo-700 text-white"
+                      >
+                        <Play className="h-3 w-3" /> Resume
+                      </Button>
+                    )}
 
-                  {/* Visual Chunk Distribution Map */}
-                  {totalChunks > 0 && totalChunks <= 60 && (
-                    <div className="pt-2 border-t border-slate-800/80">
-                      <div className="text-[11px] font-mono text-slate-400 mb-1.5 flex items-center gap-1">
-                        <Layers className="h-3 w-3 text-indigo-400" />
-                        Chunk Map ({completedCount}/{totalChunks}):
-                      </div>
-                      <div className="flex flex-wrap gap-1">
-                        {Array.from({ length: totalChunks }).map((_, idx) => {
-                          const isCompleted = session?.completed_indices?.includes(idx);
-                          const isCurrent = currentChunkIndex === idx;
-
-                          let bg = "bg-slate-800 text-slate-500";
-                          if (isCompleted) bg = "bg-emerald-600/80 text-white";
-                          else if (isCurrent) bg = "bg-amber-500 text-slate-950 animate-pulse font-bold";
-
-                          return (
-                            <span
-                              key={idx}
-                              title={`Chunk #${idx}: ${isCompleted ? "Completed" : isCurrent ? "Uploading..." : "Pending"}`}
-                              className={`h-5 w-6 rounded text-[10px] flex items-center justify-center font-mono ${bg}`}
-                            >
-                              {idx + 1}
-                            </span>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* Error Box */}
-              {errorMsg && (
-                <div className="rounded-lg border border-rose-800/80 bg-rose-950/40 p-3 text-sm text-rose-300 flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-2">
-                    <AlertCircle className="h-4 w-4 shrink-0 text-rose-400" />
-                    <span>{errorMsg}</span>
-                  </div>
-                  {session && !isUploading && (
                     <Button
-                      variant="outline"
+                      variant="destructive"
                       size="sm"
-                      onClick={handleResume}
-                      className="h-7 px-2 text-xs flex items-center gap-1 text-slate-200 border-rose-800"
+                      onClick={handleCancel}
+                      className="h-7 px-3 text-xs flex items-center gap-1"
                     >
-                      <RotateCcw className="h-3 w-3" /> Retry Resume
+                      <XCircle className="h-3 w-3" /> Cancel
                     </Button>
-                  )}
+                  </div>
                 </div>
-              )}
-            </>
-          )}
-        </CardContent>
-      </Card>
+
+                {/* Visual Chunk Distribution Map */}
+                {totalChunks > 0 && totalChunks <= 60 && (
+                  <div className="pt-2 border-t border-gray-200/80">
+                    <div className="text-[11px] font-mono text-gray-500 mb-1.5 flex items-center gap-1">
+                      <Layers className="h-3 w-3 text-indigo-600" />
+                      Chunk Map ({completedCount}/{totalChunks}):
+                    </div>
+                    <div className="flex flex-wrap gap-1">
+                      {Array.from({ length: totalChunks }).map((_, idx) => {
+                        const isCompleted = session?.completed_indices?.includes(idx);
+                        const isCurrent = currentChunkIndex === idx;
+
+                        let bg = "bg-gray-200 text-gray-600";
+                        if (isCompleted) bg = "bg-emerald-600 text-white";
+                        else if (isCurrent) bg = "bg-amber-400 text-slate-900 font-bold animate-pulse";
+
+                        return (
+                          <span
+                            key={idx}
+                            title={`Chunk #${idx}: ${isCompleted ? "Completed" : isCurrent ? "Uploading..." : "Pending"}`}
+                            className={`h-5 w-6 rounded text-[10px] flex items-center justify-center font-mono ${bg}`}
+                          >
+                            {idx + 1}
+                          </span>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Error Box */}
+            {errorMsg && (
+              <div className="rounded-xl border border-rose-200 bg-rose-50 p-3.5 text-xs text-rose-900 flex items-center justify-between gap-2 shadow-xs">
+                <div className="flex items-center gap-2">
+                  <AlertCircle className="h-4 w-4 shrink-0 text-rose-600" />
+                  <span>{errorMsg}</span>
+                </div>
+                {session && !isUploading && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleResume}
+                    className="h-7 px-2 text-xs flex items-center gap-1 border-rose-300 bg-white text-rose-900 hover:bg-rose-50"
+                  >
+                    <RotateCcw className="h-3 w-3" /> Retry Resume
+                  </Button>
+                )}
+              </div>
+            )}
+          </>
+        )}
+      </div>
+
       <AuthModal
         isOpen={authModalOpen}
         onClose={() => setAuthModalOpen(false)}

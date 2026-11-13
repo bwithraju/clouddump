@@ -3,159 +3,89 @@
 import * as React from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { HardDrive, Files, UploadCloud, Server, Activity, CheckCircle2, AlertCircle, LogIn, LogOut, User as UserIcon } from "lucide-react";
-import { useHealth } from "@/hooks/use-health";
+import { HardDrive, Files, UploadCloud, Server, LogIn, LogOut } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
-import { Button } from "@/components/ui/button";
 import { AuthModal } from "@/components/auth-modal";
-import { cn } from "@/lib/utils";
 
 export function Navbar() {
   const pathname = usePathname();
-  const { data: health, isLoading, isError } = useHealth();
-  const { user, isAuthenticated, logout, isLoggingOut } = useAuth();
+  const { user, isAuthenticated, logout } = useAuth();
   const [authModalOpen, setAuthModalOpen] = React.useState(false);
-  const [authModalMode, setAuthModalMode] = React.useState<"login" | "register">("login");
 
   const navLinks = [
     { href: "/", label: "Dashboard", icon: HardDrive },
-    { href: "/files", label: "File Manager", icon: Files },
+    { href: "/files", label: "My files", icon: Files },
     { href: "/upload", label: "Upload", icon: UploadCloud },
-    { href: "/nodes", label: "Storage Nodes", icon: Server },
+    { href: "/nodes", label: "Nodes & Storage", icon: Server },
   ];
 
   return (
     <>
-      <header className="sticky top-0 z-50 border-b border-slate-800 bg-slate-950/80 backdrop-blur-md">
-      <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8">
-        {/* Left: Brand */}
-        <div className="flex items-center gap-6">
-          <Link href="/" className="flex items-center gap-2 group">
-            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-indigo-600/20 border border-indigo-500/30 text-indigo-400 group-hover:bg-indigo-600/30 transition-colors">
-              <HardDrive className="h-5 w-5" />
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <span className="font-bold text-lg text-white tracking-tight">CloudDump</span>
-                <span className="rounded bg-indigo-950/90 px-1.5 py-0.5 text-[10px] font-mono text-indigo-300 border border-indigo-800">
-                  Pool
-                </span>
+      <header className="sticky top-0 z-40 border-b border-gray-200/80 bg-white/95 backdrop-blur-xs">
+        <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8">
+          <div className="flex items-center gap-6">
+            <Link href="/" className="flex items-center gap-2.5">
+              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-indigo-600 text-white shadow-xs">
+                <HardDrive className="h-4 w-4" />
               </div>
-            </div>
-          </Link>
+              <span className="font-bold text-lg text-slate-900 tracking-tight">CloudDump</span>
+            </Link>
 
-          {/* Navigation Links */}
-          <nav className="hidden md:flex items-center gap-1">
-            {navLinks.map((item) => {
-              const Icon = item.icon;
-              const isActive =
-                item.href === "/"
-                  ? pathname === "/"
-                  : pathname.startsWith(item.href);
-
-              return (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  className={cn(
-                    "flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium transition-colors",
-                    isActive
-                      ? "bg-slate-800 text-white font-semibold"
-                      : "text-slate-400 hover:text-slate-200 hover:bg-slate-900"
-                  )}
-                >
-                  <Icon className={cn("h-4 w-4", isActive ? "text-indigo-400" : "text-slate-500")} />
-                  {item.label}
-                </Link>
-              );
-            })}
-          </nav>
-        </div>
-
-        {/* Right: User Auth & Backend Status */}
-        <div className="flex items-center gap-3">
-          {/* Backend Health Badge */}
-          <div className="hidden sm:flex items-center gap-2 rounded-full border border-slate-800 bg-slate-900/90 px-3 py-1 text-xs">
-            {isLoading ? (
-              <>
-                <Activity className="h-3.5 w-3.5 text-amber-400 animate-spin" />
-                <span className="text-slate-400">Connecting...</span>
-              </>
-            ) : isError ? (
-              <>
-                <AlertCircle className="h-3.5 w-3.5 text-rose-400" />
-                <span className="text-rose-400 font-medium">Backend Offline</span>
-              </>
-            ) : (
-              <>
-                <span className="relative flex h-2 w-2">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                  <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
-                </span>
-                <span className="text-emerald-400 font-medium flex items-center gap-1">
-                  <CheckCircle2 className="h-3.5 w-3.5" />
-                  API Online
-                </span>
-              </>
-            )}
+            <nav className="hidden md:flex items-center gap-1">
+              {navLinks.map((item) => {
+                const Icon = item.icon;
+                const isActive =
+                  item.href === "/"
+                    ? pathname === "/"
+                    : pathname === item.href || pathname.startsWith(`${item.href}/`);
+                return (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    className={`flex items-center gap-2 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
+                      isActive
+                        ? "bg-gray-100 text-slate-900 font-semibold"
+                        : "text-gray-600 hover:bg-gray-50 hover:text-slate-900"
+                    }`}
+                  >
+                    <Icon className="h-3.5 w-3.5" />
+                    <span>{item.label}</span>
+                  </Link>
+                );
+              })}
+            </nav>
           </div>
 
-          {/* Auth Controls */}
-          {isAuthenticated && user ? (
-            <div className="flex items-center gap-2.5">
-              <div className="flex items-center gap-1.5 rounded-lg border border-slate-800 bg-slate-900 px-2.5 py-1 text-xs">
-                <UserIcon className="h-3.5 w-3.5 text-indigo-400" />
-                <span className="font-medium text-slate-200 truncate max-w-[140px]" title={user.email}>
-                  {user.name || user.email}
-                </span>
+          <div className="flex items-center gap-3">
+            {isAuthenticated && user ? (
+              <div className="flex items-center gap-2 text-xs">
+                <span className="text-gray-600">{user.email}</span>
+                <button
+                  type="button"
+                  onClick={() => logout()}
+                  className="rounded-lg p-1.5 text-gray-400 hover:text-slate-900"
+                >
+                  <LogOut className="h-4 w-4" />
+                </button>
               </div>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => logout()}
-                disabled={isLoggingOut}
-                className="h-8 px-2.5 text-xs text-slate-400 hover:text-rose-400 flex items-center gap-1"
-                title="Log out"
+            ) : (
+              <button
+                type="button"
+                onClick={() => setAuthModalOpen(true)}
+                className="rounded-lg bg-slate-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-slate-800 shadow-xs"
               >
-                <LogOut className="h-3.5 w-3.5" />
-                <span className="hidden sm:inline">Logout</span>
-              </Button>
-            </div>
-          ) : (
-            <div className="flex items-center gap-1.5">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  setAuthModalMode("login");
-                  setAuthModalOpen(true);
-                }}
-                className="h-8 px-3 text-xs flex items-center gap-1.5 text-slate-200 border-slate-700"
-              >
-                <LogIn className="h-3.5 w-3.5 text-indigo-400" />
-                <span>Log In</span>
-              </Button>
-              <Button
-                size="sm"
-                onClick={() => {
-                  setAuthModalMode("register");
-                  setAuthModalOpen(true);
-                }}
-                className="h-8 px-3 text-xs hidden sm:inline-flex bg-indigo-600 hover:bg-indigo-500"
-              >
-                Sign Up
-              </Button>
-            </div>
-          )}
+                Sign In
+              </button>
+            )}
+          </div>
         </div>
-      </div>
-    </header>
+      </header>
 
-    <AuthModal
-      isOpen={authModalOpen}
-      onClose={() => setAuthModalOpen(false)}
-      defaultMode={authModalMode}
-    />
-  </>
-);
+      <AuthModal
+        isOpen={authModalOpen}
+        onClose={() => setAuthModalOpen(false)}
+        defaultMode="login"
+      />
+    </>
+  );
 }
