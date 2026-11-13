@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"database/sql"
 	"errors"
@@ -26,7 +27,37 @@ import (
 	"github.com/bwithraju/clouddump/backend/internal/workers"
 )
 
+// loadDotEnv parses key=val pairs from .env files if present into environment variables.
+func loadDotEnv(paths ...string) {
+	for _, p := range paths {
+		f, err := os.Open(p)
+		if err != nil {
+			continue
+		}
+		defer f.Close()
+		scanner := bufio.NewScanner(f)
+		for scanner.Scan() {
+			line := strings.TrimSpace(scanner.Text())
+			if line == "" || strings.HasPrefix(line, "#") {
+				continue
+			}
+			parts := strings.SplitN(line, "=", 2)
+			if len(parts) == 2 {
+				key := strings.TrimSpace(parts[0])
+				val := strings.Trim(strings.TrimSpace(parts[1]), "\"'")
+				if os.Getenv(key) == "" {
+					_ = os.Setenv(key, val)
+				}
+			}
+		}
+		log.Printf("Loaded environment variables from %s", p)
+		return
+	}
+}
+
 func main() {
+	loadDotEnv(".env", "../.env")
+
 	// Initialize structured logging (JSON by default, text if requested)
 	var logHandler slog.Handler
 	if os.Getenv("LOG_FORMAT") == "text" {
@@ -158,7 +189,7 @@ func main() {
 
 	googleOAuthConfig := auth.NewGoogleOAuthConfig()
 	oauthService := auth.NewOAuthService(googleOAuthConfig, repo.OAuthTokens())
-	oauthHandler := api.NewOAuthHandler(oauthService, mgr, repo)
+	oauthHandler := api.NewOAuthHandler(oauthService, mgr, repo, parallelUploader)
 
 	// 6. Initialize Redis / Background Job Queue & Workers
 	var jobQueue jobs.JobQueue

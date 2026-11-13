@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { Server, HardDrive, CheckCircle2, AlertTriangle, RefreshCw, PowerOff, Power, ShieldAlert, Cloud, PlusCircle } from "lucide-react";
+import { Server, HardDrive, CheckCircle2, AlertTriangle, RefreshCw, PowerOff, Power, ShieldAlert, Cloud, PlusCircle, FolderOpen, AlertCircle } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { usePoolStats, useNodes } from "@/hooks/use-nodes";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { formatBytes, formatDate } from "@/lib/utils";
+import { GDriveBrowserModal } from "@/components/gdrive-browser-modal";
 import {
   simulateNodeFailure,
   triggerReconcile,
@@ -29,12 +30,35 @@ export default function StorageNodesPage() {
   const [gdriveConnected, setGdriveConnected] = React.useState(false);
   const [connecting, setConnecting] = React.useState(false);
   const [creatingNode, setCreatingNode] = React.useState(false);
+  const [browserModalOpen, setBrowserModalOpen] = React.useState(false);
+  const [oauthBanner, setOauthBanner] = React.useState<{ type: "success" | "error"; message: string } | null>(null);
 
   React.useEffect(() => {
-    fetchGoogleOAuthStatus().then((status) => {
-      setGdriveConnected(status.connected);
-    }).catch(() => {});
-  }, []);
+    fetchGoogleOAuthStatus()
+      .then((status) => {
+        setGdriveConnected(status.connected);
+      })
+      .catch(() => {});
+
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get("gdrive") === "connected") {
+        setOauthBanner({
+          type: "success",
+          message: "Google Drive account was successfully linked via OAuth 2.0! You can now browse files or add Google Drive storage nodes.",
+        });
+        setGdriveConnected(true);
+        queryClient.invalidateQueries({ queryKey: ["nodes"] });
+        window.history.replaceState({}, "", window.location.pathname);
+      } else if (params.get("gdrive_error")) {
+        setOauthBanner({
+          type: "error",
+          message: `Google OAuth Authorization Failed: ${params.get("gdrive_error")}`,
+        });
+        window.history.replaceState({}, "", window.location.pathname);
+      }
+    }
+  }, [queryClient]);
 
   const handleConnectGDrive = async () => {
     try {
@@ -230,6 +254,34 @@ export default function StorageNodesPage() {
         </Card>
       </div>
 
+      {/* OAuth Callback Notification Banner */}
+      {oauthBanner && (
+        <div
+          className={`rounded-lg p-4 text-xs flex items-center justify-between gap-3 ${
+            oauthBanner.type === "success"
+              ? "border border-emerald-800 bg-emerald-950/40 text-emerald-200"
+              : "border border-rose-800 bg-rose-950/40 text-rose-200"
+          }`}
+        >
+          <div className="flex items-center gap-2.5">
+            {oauthBanner.type === "success" ? (
+              <CheckCircle2 className="h-5 w-5 text-emerald-400 shrink-0" />
+            ) : (
+              <AlertCircle className="h-5 w-5 text-rose-400 shrink-0" />
+            )}
+            <span>{oauthBanner.message}</span>
+          </div>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setOauthBanner(null)}
+            className="h-6 px-2 text-xs text-slate-400 hover:text-white"
+          >
+            Dismiss
+          </Button>
+        </div>
+      )}
+
       {/* Cloud Storage Provider Integration */}
       <Card className="border-indigo-900/50 bg-slate-900/40">
         <CardHeader className="pb-3">
@@ -239,7 +291,7 @@ export default function StorageNodesPage() {
               <CardTitle className="text-base font-semibold">Google Drive Storage Provider</CardTitle>
             </div>
             <Badge variant={gdriveConnected ? "success" : "outline"}>
-              {gdriveConnected ? "OAuth Linked" : "Not Connected"}
+              {gdriveConnected ? "OAuth Linked (Active)" : "Not Connected"}
             </Badge>
           </div>
           <CardDescription className="text-xs">
@@ -261,12 +313,21 @@ export default function StorageNodesPage() {
               <>
                 <Button
                   size="sm"
+                  onClick={() => setBrowserModalOpen(true)}
+                  className="bg-indigo-600 hover:bg-indigo-500 text-xs flex items-center gap-1.5"
+                >
+                  <FolderOpen className="h-3.5 w-3.5" />
+                  Browse &amp; Import Files from Drive
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
                   onClick={handleCreateDriveNode}
                   disabled={creatingNode}
-                  className="bg-emerald-600 hover:bg-emerald-500 text-xs flex items-center gap-1.5"
+                  className="text-xs border-indigo-800 text-indigo-300 hover:bg-indigo-950/40 flex items-center gap-1.5"
                 >
                   <PlusCircle className="h-3.5 w-3.5" />
-                  {creatingNode ? "Adding Node..." : "Add Google Drive Node to Pool"}
+                  {creatingNode ? "Adding Node..." : "Add Drive Node to Pool"}
                 </Button>
                 <Button
                   variant="outline"
@@ -281,6 +342,11 @@ export default function StorageNodesPage() {
           </div>
         </CardContent>
       </Card>
+
+      <GDriveBrowserModal
+        isOpen={browserModalOpen}
+        onClose={() => setBrowserModalOpen(false)}
+      />
 
       {/* Node Cards Grid */}
       <div>

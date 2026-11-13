@@ -306,6 +306,63 @@ export async function createGoogleDriveNode(name?: string, folderId?: string): P
   return res.json();
 }
 
+export interface DriveFileItem {
+  id: string;
+  name: string;
+  mime_type: string;
+  size: number;
+  modified_time: string;
+  icon_link?: string;
+  thumbnail_link?: string;
+  is_folder: boolean;
+}
+
+export interface ListDriveFilesResponse {
+  files: DriveFileItem[];
+  next_page_token?: string;
+}
+
+export async function fetchGoogleDriveFiles(
+  query?: string,
+  pageToken?: string
+): Promise<ListDriveFilesResponse> {
+  const params = new URLSearchParams();
+  if (query) params.set("q", query);
+  if (pageToken) params.set("pageToken", pageToken);
+
+  const res = await fetch(`${API_BASE_URL}/oauth/google/files?${params.toString()}`, {
+    headers: getAuthHeaders(),
+    credentials: "include",
+  });
+  if (!res.ok) {
+    const errText = await res.text();
+    throw new Error(errText || `Failed to fetch Google Drive files: HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function importGoogleDriveFile(
+  fileId: string,
+  filename?: string,
+  replicationFactor: number = 1
+): Promise<any> {
+  const res = await fetch(`${API_BASE_URL}/oauth/google/import`, {
+    method: "POST",
+    headers: getAuthHeaders({ "Content-Type": "application/json" }),
+    credentials: "include",
+    body: JSON.stringify({
+      file_id: fileId,
+      filename,
+      replication_factor: replicationFactor,
+    }),
+  });
+  if (!res.ok) {
+    const errText = await res.text();
+    throw new Error(errText || `Failed to import file from Google Drive: HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
 // Health Check
 export async function fetchHealth(): Promise<HealthCheckResponse> {
   const res = await fetch(`${API_BASE_URL}/health`, {

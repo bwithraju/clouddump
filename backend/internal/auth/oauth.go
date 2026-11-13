@@ -46,7 +46,7 @@ func NewGoogleOAuthConfig() *GoogleOAuthConfig {
 		ClientID:     clientID,
 		ClientSecret: clientSecret,
 		RedirectURL:  redirectURI,
-		Scopes:       []string{GoogleDriveFileScope},
+		Scopes:       []string{GoogleDriveScope, GoogleDriveFileScope},
 		Endpoint:     google.Endpoint,
 	}
 

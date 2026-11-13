@@ -191,10 +191,13 @@ func NewRouter(configs ...RouterConfig) http.Handler {
 		if cfg.OAuthHandler != nil {
 			oh := cfg.OAuthHandler
 			mux.HandleFunc("GET /api/oauth/google/auth-url", oh.GetAuthURL)
+			mux.HandleFunc("GET /api/oauth/google/callback", oh.Callback)
 			mux.HandleFunc("POST /api/oauth/google/callback", wrapAuth(oh.Callback))
 			mux.HandleFunc("GET /api/oauth/google/status", wrapAuth(oh.Status))
 			mux.HandleFunc("POST /api/oauth/google/disconnect", wrapAuth(oh.Disconnect))
 			mux.HandleFunc("POST /api/nodes/google-drive", wrapAuth(oh.CreateDriveNode))
+			mux.HandleFunc("GET /api/oauth/google/files", wrapAuth(oh.ListDriveFiles))
+			mux.HandleFunc("POST /api/oauth/google/import", wrapAuth(oh.ImportDriveFile))
 		}
 
 		// Register Background Jobs endpoints if JobsHandler is provided

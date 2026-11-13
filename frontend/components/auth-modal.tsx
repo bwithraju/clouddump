@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { createPortal } from "react-dom";
 import { X, Lock, Mail, User as UserIcon, Loader2, AlertCircle } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import { Button } from "@/components/ui/button";
@@ -11,7 +12,13 @@ interface AuthModalProps {
   defaultMode?: "login" | "register";
 }
 
-export function AuthModal({ isOpen, onClose, defaultMode = "login" }: AuthModalProps) {
+function AuthModalContent({
+  onClose,
+  defaultMode,
+}: {
+  onClose: () => void;
+  defaultMode: "login" | "register";
+}) {
   const [mode, setMode] = React.useState<"login" | "register">(defaultMode);
   const [email, setEmail] = React.useState("");
   const [password, setPassword] = React.useState("");
@@ -21,23 +28,16 @@ export function AuthModal({ isOpen, onClose, defaultMode = "login" }: AuthModalP
   const { login, register, isLoggingIn, isRegistering } = useAuth();
   const isSubmitting = isLoggingIn || isRegistering;
 
-  React.useEffect(() => {
-    setMode(defaultMode);
-    setErrorMsg(null);
-  }, [defaultMode, isOpen]);
-
   // Handle escape key
   React.useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && isOpen) {
+      if (e.key === "Escape") {
         onClose();
       }
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isOpen, onClose]);
-
-  if (!isOpen) return null;
+  }, [onClose]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -64,13 +64,19 @@ export function AuthModal({ isOpen, onClose, defaultMode = "login" }: AuthModalP
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-in fade-in duration-200">
-      <div
-        className="relative w-full max-w-md rounded-xl border border-slate-800 bg-slate-900 p-6 shadow-2xl space-y-6"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="auth-modal-title"
-      >
+    <div
+      className="fixed inset-0 z-50 overflow-y-auto bg-slate-950/80 backdrop-blur-sm animate-in fade-in duration-200"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
+      <div className="flex min-h-full items-center justify-center p-4">
+        <div
+          className="relative w-full max-w-md rounded-xl border border-slate-800 bg-slate-900 p-6 shadow-2xl space-y-6"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="auth-modal-title"
+        >
         {/* Close Button */}
         <button
           type="button"
@@ -188,7 +194,7 @@ export function AuthModal({ isOpen, onClose, defaultMode = "login" }: AuthModalP
           <Button
             type="submit"
             disabled={isSubmitting}
-            className="w-full flex items-center justify-center gap-2 mt-2"
+            className="w-full flex items-center justify-center gap-2 mt-2 bg-indigo-600 hover:bg-indigo-500 text-white"
           >
             {isSubmitting ? (
               <>
@@ -204,5 +210,21 @@ export function AuthModal({ isOpen, onClose, defaultMode = "login" }: AuthModalP
         </form>
       </div>
     </div>
+  </div>
+  );
+}
+
+export function AuthModal({ isOpen, onClose, defaultMode = "login" }: AuthModalProps) {
+  const [mounted, setMounted] = React.useState(false);
+
+  React.useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  if (!isOpen || !mounted) return null;
+
+  return createPortal(
+    <AuthModalContent key={`${defaultMode}-${isOpen}`} onClose={onClose} defaultMode={defaultMode} />,
+    document.body
   );
 }
