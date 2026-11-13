@@ -35,7 +35,9 @@ func NewGoogleOAuthConfig() *GoogleOAuthConfig {
 	clientID := os.Getenv("GOOGLE_CLIENT_ID")
 	clientSecret := os.Getenv("GOOGLE_CLIENT_SECRET")
 	redirectURI := os.Getenv("GOOGLE_REDIRECT_URI")
-
+	if redirectURI == "" {
+		redirectURI = os.Getenv("GOOGLE_REDIRECT_URL")
+	}
 	if redirectURI == "" {
 		redirectURI = "http://localhost:8080/api/oauth/google/callback"
 	}
