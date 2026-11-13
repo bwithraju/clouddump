@@ -17,7 +17,9 @@ import {
   Layers,
   RefreshCw,
   Loader2,
+  Trash2,
 } from "lucide-react";
+import { useQueryClient } from "@tanstack/react-query";
 import { usePoolStats } from "@/hooks/use-nodes";
 import { useFiles } from "@/hooks/use-files";
 import { useSystemActivity, useUploadSessions } from "@/hooks/use-system";
@@ -27,9 +29,10 @@ import { Button, getButtonClassName } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { formatBytes, formatDate } from "@/lib/utils";
-import { downloadFileWithProgress, DownloadState } from "@/lib/api";
+import { downloadFileWithProgress, DownloadState, deleteFile } from "@/lib/api";
 
 export default function DashboardPage() {
+  const queryClient = useQueryClient();
   const { data: stats, isLoading: statsLoading } = usePoolStats();
   const { data: files, isLoading: filesLoading } = useFiles();
   const { data: activity, isLoading: activityLoading, refetch: refetchActivity } = useSystemActivity();
@@ -37,6 +40,7 @@ export default function DashboardPage() {
 
   // Live download progress state
   const [downloadState, setDownloadState] = useState<DownloadState | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const totalCapacity = stats?.total_capacity || activity?.pool_stats?.total_capacity || 0;
   const usedCapacity = stats?.used_capacity || activity?.pool_stats?.used_capacity || 0;
@@ -83,6 +87,29 @@ export default function DashboardPage() {
           ? { ...prev, status: "failed", error: err.message || "Download failed" }
           : prev
       );
+    }
+  };
+
+  const handleDelete = async (fileId: string, filename: string) => {
+    if (
+      !window.confirm(
+        `Are you sure you want to delete "${filename}"? All stored chunks across nodes will be permanently removed.`
+      )
+    ) {
+      return;
+    }
+
+    setDeletingId(fileId);
+    try {
+      await deleteFile(fileId);
+      queryClient.invalidateQueries({ queryKey: ["files"] });
+      queryClient.invalidateQueries({ queryKey: ["nodes-stats"] });
+      queryClient.invalidateQueries({ queryKey: ["nodes"] });
+      queryClient.invalidateQueries({ queryKey: ["system/activity"] });
+    } catch (err: any) {
+      alert(`Failed to delete file: ${err.message || err}`);
+    } finally {
+      setDeletingId(null);
     }
   };
 
@@ -542,7 +569,7 @@ export default function DashboardPage() {
                     </TableCell>
                     <TableCell className="text-slate-400">{file.total_chunks}</TableCell>
                     <TableCell className="text-slate-400">{formatDate(file.created_at)}</TableCell>
-                    <TableCell className="text-right space-x-2">
+                    <TableCell className="text-right space-x-1.5">
                       <Button
                         variant="ghost"
                         size="sm"
@@ -562,6 +589,20 @@ export default function DashboardPage() {
                       >
                         Details
                       </Link>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        disabled={deletingId === file.id}
+                        onClick={() => handleDelete(file.id, file.filename)}
+                        className="text-rose-400 hover:text-rose-300 hover:bg-rose-950/40"
+                        title="Delete file and chunks"
+                      >
+                        {deletingId === file.id ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <Trash2 className="h-3.5 w-3.5" />
+                        )}
+                      </Button>
                     </TableCell>
                   </TableRow>
                 ))}

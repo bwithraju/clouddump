@@ -15,6 +15,9 @@ import {
   Layers,
   ShieldCheck,
   LogIn,
+  Trash2,
+  Download,
+  Loader2,
 } from "lucide-react";
 import {
   initResumableUpload,
@@ -23,6 +26,8 @@ import {
   cancelResumableUpload,
   SessionSummary,
   uploadFile,
+  deleteFile,
+  downloadFile,
 } from "@/lib/api";
 import { useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/use-auth";
@@ -50,6 +55,8 @@ export default function UploadPage() {
   const [currentChunkIndex, setCurrentChunkIndex] = React.useState<number | null>(null);
   const [errorMsg, setErrorMsg] = React.useState<string | null>(null);
   const [completedFileId, setCompletedFileId] = React.useState<string | null>(null);
+  const [isDeleting, setIsDeleting] = React.useState(false);
+  const [actionFeedback, setActionFeedback] = React.useState<{ type: "success" | "error"; message: string } | null>(null);
 
   const pausedRef = React.useRef(false);
   const cancelledRef = React.useRef(false);
@@ -77,6 +84,7 @@ export default function UploadPage() {
   const handleSelectFile = (file: File) => {
     setSelectedFile(file);
     setErrorMsg(null);
+    setActionFeedback(null);
     setSession(null);
     setCompletedFileId(null);
     setIsUploading(false);
@@ -149,6 +157,7 @@ export default function UploadPage() {
     if (!selectedFile) return;
 
     setErrorMsg(null);
+    setActionFeedback(null);
     setCompletedFileId(null);
 
     if (!isAuthenticated) {
@@ -227,12 +236,61 @@ export default function UploadPage() {
     setSession(null);
     setCompletedFileId(null);
     setErrorMsg(null);
+    setActionFeedback(null);
     setIsUploading(false);
     setIsPaused(false);
     setCurrentChunkIndex(null);
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
     }
+  };
+
+  const handleDeleteCompleted = async () => {
+    if (!completedFileId) return;
+    const filename = session?.filename || selectedFile?.name || "this file";
+    if (
+      !window.confirm(
+        `Are you sure you want to delete "${filename}"? All chunks across storage nodes will be permanently removed.`
+      )
+    ) {
+      return;
+    }
+
+    setIsDeleting(true);
+    setActionFeedback(null);
+
+    try {
+      await deleteFile(completedFileId);
+      queryClient.invalidateQueries({ queryKey: ["files"] });
+      queryClient.invalidateQueries({ queryKey: ["nodes-stats"] });
+      queryClient.invalidateQueries({ queryKey: ["nodes"] });
+      queryClient.invalidateQueries({ queryKey: ["system/activity"] });
+
+      setActionFeedback({
+        type: "success",
+        message: `File "${filename}" was successfully deleted and its chunks were purged.`,
+      });
+      setCompletedFileId(null);
+      setSelectedFile(null);
+      setSession(null);
+      setCurrentChunkIndex(null);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = "";
+      }
+    } catch (err: any) {
+      setActionFeedback({
+        type: "error",
+        message: err.message || "Failed to delete file from storage pool.",
+      });
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
+  const handleDownloadCompleted = () => {
+    if (!completedFileId) return;
+    const filename = session?.filename || selectedFile?.name || "download";
+    downloadFile(completedFileId, filename);
   };
 
   const progressPercent = session ? Math.round(session.progress_percent) : 0;
@@ -273,6 +331,34 @@ export default function UploadPage() {
         </div>
       )}
 
+      {/* Feedback Banner (e.g. after file is deleted) */}
+      {actionFeedback && !completedFileId && (
+        <div
+          className={`rounded-lg p-3 text-xs flex items-center justify-between gap-2 ${
+            actionFeedback.type === "success"
+              ? "border border-emerald-800 bg-emerald-950/40 text-emerald-300"
+              : "border border-rose-800 bg-rose-950/40 text-rose-300"
+          }`}
+        >
+          <div className="flex items-center gap-2">
+            {actionFeedback.type === "success" ? (
+              <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-400" />
+            ) : (
+              <AlertCircle className="h-4 w-4 shrink-0 text-rose-400" />
+            )}
+            <span>{actionFeedback.message}</span>
+          </div>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setActionFeedback(null)}
+            className="h-6 px-1.5 text-xs text-slate-400 hover:text-white"
+          >
+            Dismiss
+          </Button>
+        </div>
+      )}
+
       <Card className="border-slate-800">
         <CardContent className="pt-6 space-y-6">
           {/* Success State */}
@@ -290,9 +376,35 @@ export default function UploadPage() {
                 </p>
               </div>
 
-              <div className="pt-4 flex items-center justify-center gap-3">
-                <Button variant="outline" onClick={handleReset}>
+              {actionFeedback && (
+                <div
+                  className={`mx-auto max-w-md rounded-lg p-3 text-xs flex items-center justify-center gap-2 ${
+                    actionFeedback.type === "success"
+                      ? "border border-emerald-800 bg-emerald-950/40 text-emerald-300"
+                      : "border border-rose-800 bg-rose-950/40 text-rose-300"
+                  }`}
+                >
+                  {actionFeedback.type === "success" ? (
+                    <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-400" />
+                  ) : (
+                    <AlertCircle className="h-4 w-4 shrink-0 text-rose-400" />
+                  )}
+                  <span>{actionFeedback.message}</span>
+                </div>
+              )}
+
+              <div className="pt-4 flex flex-wrap items-center justify-center gap-3">
+                <Button variant="outline" onClick={handleReset} className="flex items-center gap-1.5">
+                  <RotateCcw className="h-3.5 w-3.5" />
                   Upload Another File
+                </Button>
+                <Button
+                  variant="secondary"
+                  onClick={handleDownloadCompleted}
+                  className="flex items-center gap-1.5 text-slate-200 hover:text-white"
+                >
+                  <Download className="h-3.5 w-3.5 text-emerald-400" />
+                  Download
                 </Button>
                 <Link
                   href={`/files/${completedFileId}`}
@@ -306,6 +418,20 @@ export default function UploadPage() {
                 >
                   Go to File Manager
                 </Link>
+                <Button
+                  variant="destructive"
+                  onClick={handleDeleteCompleted}
+                  disabled={isDeleting}
+                  className="flex items-center gap-1.5 bg-rose-600 hover:bg-rose-500 text-white"
+                  title="Delete file and permanently remove all chunks"
+                >
+                  {isDeleting ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <Trash2 className="h-3.5 w-3.5" />
+                  )}
+                  {isDeleting ? "Deleting..." : "Delete File"}
+                </Button>
               </div>
             </div>
           ) : (
